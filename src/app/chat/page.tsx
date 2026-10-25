@@ -83,7 +83,7 @@ const WA_DOODLE =
 // added later via SQL migrations). We try with them first and drop any column
 // the schema cache reports as missing, so BOTH schemas work.
 // ---------------------------------------------------------------------------
-const OPTIONAL_MSG_COLS = ["receiver_id", "message_type", "is_read", "delivered_at"];
+const OPTIONAL_MSG_COLS = ["receiver_id", "message_type", "is_read"];
 const colSupported: Record<string, boolean> = {};
 // Flipped to false once we learn the read-receipt columns don't exist, so the
 // mark-as-read UPDATE isn't retried (and can't error) on every message.
@@ -108,7 +108,7 @@ async function insertMessage(payload: Record<string, any>) {
     if (flagged) {
       // Column doesn't exist yet → drop it and retry without it.
       colSupported[flagged] = false;
-      if (flagged === "is_read" || flagged === "delivered_at") readReceiptsSupported = false;
+      if (flagged === "is_read") readReceiptsSupported = false;
       delete p[flagged];
       continue;
     }
@@ -200,7 +200,6 @@ export default function ChatPage() {
   const incomingCallRef = useRef<IncomingCall | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const chatChannelRef = useRef<any>(null);
-  const readReceiptsChannelRef = useRef<any>(null);
   const presenceChannelRef = useRef<any>(null);
   const callsChannelRef = useRef<any>(null);
 
@@ -386,20 +385,38 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, user?.id]);
 
-  // Realtime: subscribe to ALL message inserts (no server-side filter, which
-  // is unreliable across schema variations) and filter in JS by the
-  // (sender,receiver) pair of the currently open chat. Deduped by id.
+  // Realtime: one channel per (user, open chat) carrying BOTH events.
+  // - INSERT: append new messages (deduped, JS pair filter). If I'm the
+  //   receiver, instantly claim delivery by setting delivered_at, which flips
+  //   the SENDER's tick from single grey to double grey via the UPDATE event.
+  // - UPDATE: read receipts — when the receiver marks my message read, the
+  //   tick flips live to blue.
+  // The topic includes Date.now() so every subscription gets a FRESH topic:
+  // reusing a topic name right after removeChannel is a known cause of
+  // missed/delayed realtime events.
   useEffect(() => {
     const myId = user?.id;
     const otherId = selected?.id;
     if (!myId || !otherId) return;
 
+    const claimDelivered = async (id: string) => {
+      if (!readReceiptsSupported) return;
+      const { error } = await supabase
+        .from("messages")
+        .update({ delivered_at: new Date().toISOString() })
+        .eq("id", id);
+      if (error) {
+        const msg = `${error.message || ""} ${error.details || ""}`;
+        if (/is_read|read_at|delivered_at/i.test(msg)) readReceiptsSupported = false;
+      }
+    };
+
     const channel = supabase
-      .channel(`chat-${myId}`)
+      .channel(`chat-${myId}-${otherId}-${Date.now()}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
-        (payload: any) => {
+        async (payload: any) => {
           const m = payload.new as Message;
           if (!m?.id) return;
           const belongs =
@@ -409,9 +426,27 @@ export default function ChatPage() {
           // Guard against a stale channel firing after switching chats
           if (selectedRef.current?.id !== otherId) return;
           setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+          // I am the receiver and it's not delivered yet → claim delivery now
+          if (m.receiver_id === myId && !m.delivered_at) await claimDelivered(m.id);
         }
       )
-      .subscribe();
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages" },
+        (payload: any) => {
+          const updated = payload.new as Message;
+          if (!updated?.id) return;
+          // Only updates to MY sent messages matter (delivered/read receipts)
+          if (updated.sender_id !== myId) return;
+          if (selectedRef.current?.id !== otherId) return;
+          setMessages((prev) =>
+            prev.some((x) => x.id === updated.id)
+              ? prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x))
+              : prev
+          );
+        }
+      )
+      .subscribe((status) => console.log("Realtime", status));
     chatChannelRef.current = channel;
     return () => {
       supabase.removeChannel(channel);
@@ -431,7 +466,11 @@ export default function ChatPage() {
       // Only rows where I am the RECEIVER and the open chat's user is the SENDER
       const { error } = await supabase
         .from("messages")
-        .update({ is_read: true, read_at: new Date().toISOString() })
+        .update({
+          is_read: true,
+          read_at: new Date().toISOString(),
+          delivered_at: new Date().toISOString(),
+        })
         .eq("receiver_id", myId)
         .eq("sender_id", otherId)
         .eq("is_read", false);
@@ -453,7 +492,7 @@ export default function ChatPage() {
         const next = prev.map((m) => {
           if (m.sender_id === otherId && m.receiver_id === myId && !m.is_read) {
             changed = true;
-            return { ...m, is_read: true, read_at: ts };
+            return { ...m, is_read: true, read_at: ts, delivered_at: m.delivered_at || ts };
           }
           return m;
         });
@@ -462,37 +501,12 @@ export default function ChatPage() {
     };
 
     // Re-arms when messages change, so new messages arriving while the chat is
-    // open get marked read after the same 1s "user is viewing" delay.
-    const timer = setTimeout(markAsRead, 1000);
+    // open get marked read after the same 1.5s "user is viewing" delay.
+    const timer = setTimeout(markAsRead, 1500);
     return () => clearTimeout(timer);
   }, [selected, user?.id, messages]);
 
-  // Realtime read receipts: when the RECEIVER marks my messages as read, their
-  // UPDATE arrives here and the sender's ticks flip live (grey → blue).
-  useEffect(() => {
-    const myId = user?.id;
-    if (!myId) return;
-    const channel = supabase
-      .channel("read-receipts")
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "messages" },
-        (payload: any) => {
-          const m = payload.new as Message;
-          if (!m?.id) return;
-          if (m.sender_id !== myId) return; // only updates to MY sent messages
-          setMessages((prev) =>
-            prev.some((x) => x.id === m.id) ? prev.map((x) => (x.id === m.id ? { ...x, ...m } : x)) : prev
-          );
-        }
-      )
-      .subscribe();
-    readReceiptsChannelRef.current = channel;
-    return () => {
-      supabase.removeChannel(channel);
-      if (readReceiptsChannelRef.current === channel) readReceiptsChannelRef.current = null;
-    };
-  }, [user?.id]);
+  // (Read receipts now arrive on the merged chat channel above.)
 
   // Realtime presence: who is online
   useEffect(() => {
@@ -667,10 +681,10 @@ export default function ChatPage() {
         sender_id: user.id,
         content: text,
         conversation_id: convIdRef.current,
-        // Read receipts: NEVER read on send — only the receiver marks it read
-        // after actually opening the chat. Auto-dropped if columns are missing.
+        // Read receipts: NEVER read or delivered on send — the RECEIVER's
+        // client claims delivery (delivered_at) via realtime, and marks read
+        // only after actually opening the chat. So: single grey tick first.
         is_read: false,
-        delivered_at: new Date().toISOString(),
       };
       // Only kept if the column exists; auto-dropped otherwise.
       if (selected.id) payload.receiver_id = selected.id;
@@ -731,9 +745,8 @@ export default function ChatPage() {
         sender_id: user.id,
         content: publicUrl,
         conversation_id: convIdRef.current,
-        // Same receipt rules as text messages: never read on send.
+        // Same receipt rules as text: never read/delivered on send.
         is_read: false,
-        delivered_at: new Date().toISOString(),
       };
       // Auto-dropped if the column doesn't exist yet.
       if (selected.id) payload.receiver_id = selected.id;

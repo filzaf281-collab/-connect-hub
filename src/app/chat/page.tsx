@@ -74,6 +74,60 @@ const bubbleColors = ["#dcf8c6", "#a8d8ea", "#e0bbe4", "#ffdfba"];
 const WA_DOODLE =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'%3E%3Cg fill='none' stroke='%23000000' stroke-opacity='0.05' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M14 18 q6 -10 16 -2 q4 8 -6 10 q-12 2 -10 -8'/%3E%3Crect x='52' y='12' width='20' height='14' rx='5'/%3E%3Cpath d='M56 26 l-3 6 l8 -5'/%3E%3Ccircle cx='108' cy='20' r='7'/%3E%3Cpath d='M104 44 h16 M112 40 l-6 8 M112 40 l6 8'/%3E%3Cpath d='M18 70 h16 v12 h-16 z M22 66 v4 M30 66 v4'/%3E%3Cpath d='M60 60 q10 -8 20 0 q4 10 -8 14 q-14 2 -12 -14'/%3E%3Ccircle cx='116' cy='74' r='6'/%3E%3Cpath d='M112 74 h8 M116 70 v8'/%3E%3Cpath d='M16 110 l10 -6 l10 6 v12 h-20 z'/%3E%3Cpath d='M58 108 h18 a4 4 0 0 1 4 4 v8 a4 4 0 0 1 -4 4 h-18 a4 4 0 0 1 -4 -4 v-8 a4 4 0 0 1 4 -4 z'/%3E%3Cpath d='M104 104 l8 8 l16 -18'/%3E%3C/g%3E%3C/svg%3E\")";
 
+// ---------------------------------------------------------------------------
+// Resilient message insert.
+// The `messages` table may or may not have `receiver_id` / `message_type`
+// (they're added later via a SQL migration). We try with them first and drop
+// any column the schema cache reports as missing, so BOTH schemas work.
+// ---------------------------------------------------------------------------
+const OPTIONAL_MSG_COLS = ["receiver_id", "message_type"];
+const colSupported: Record<string, boolean> = {};
+
+async function insertMessage(payload: Record<string, any>) {
+  const p: Record<string, any> = { ...payload };
+  // Skip columns we already learned are missing (avoids a failing round-trip).
+  for (const c of OPTIONAL_MSG_COLS) {
+    if (colSupported[c] === false) delete p[c];
+  }
+
+  for (let i = 0; i <= OPTIONAL_MSG_COLS.length; i++) {
+    const { data, error } = await supabase.from("messages").insert(p).select();
+    if (!error) {
+      for (const c of OPTIONAL_MSG_COLS) if (c in p) colSupported[c] = true;
+      return { data, error: null as any };
+    }
+
+    const msg = `${error.message || ""} ${error.details || ""}`;
+    const flagged = OPTIONAL_MSG_COLS.find((c) => c in p && msg.includes(c));
+    if (flagged) {
+      // Column doesn't exist yet → drop it and retry without it.
+      colSupported[flagged] = false;
+      delete p[flagged];
+      continue;
+    }
+    return { data, error };
+  }
+  return { data: null, error: { message: "Could not insert message" } };
+}
+
+// ---------------------------------------------------------------------------
+// Classify a message when `message_type` isn't stored (column not added yet),
+// by inferring from the content. Text stays text; storage URLs become media.
+// ---------------------------------------------------------------------------
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i;
+const FILE_EXT =
+  /\.(pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar|gz|mp3|mp4|wav|mov|avi|mkv)$/i;
+
+function classifyMessage(msg: Message): string {
+  if (msg.message_type) return msg.message_type;
+  const c = (msg.content || "").trim();
+  if (!/^https?:\/\//i.test(c)) return "text";
+  const path = c.split(/[?#]/)[0];
+  if (IMAGE_EXT.test(path)) return "image";
+  if (FILE_EXT.test(path)) return "file";
+  return "text";
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
@@ -468,15 +522,15 @@ export default function ChatPage() {
     if (!text || !user?.id || !selected) return;
 
     try {
-      const { data, error } = await supabase
-        .from("messages")
-        .insert({
-          sender_id: user.id,
-          receiver_id: selected.id,
-          content: text,
-          conversation_id: convIdRef.current,
-        })
-        .select();
+      const payload: Record<string, any> = {
+        sender_id: user.id,
+        content: text,
+        conversation_id: convIdRef.current,
+      };
+      // Only kept if the column exists; auto-dropped otherwise.
+      if (selected.id) payload.receiver_id = selected.id;
+
+      const { data, error } = await insertMessage(payload);
 
       if (error) {
         console.log("Send error:", error.message);
@@ -527,16 +581,16 @@ export default function ChatPage() {
         data: { publicUrl },
       } = supabase.storage.from("chat-files").getPublicUrl(fileName);
 
-      const { data, error: insErr } = await supabase
-        .from("messages")
-        .insert({
-          sender_id: user.id,
-          receiver_id: selected.id,
-          content: publicUrl,
-          message_type: file.type.startsWith("image") ? "image" : "file",
-          conversation_id: convIdRef.current,
-        })
-        .select();
+      const payload: Record<string, any> = {
+        sender_id: user.id,
+        content: publicUrl,
+        conversation_id: convIdRef.current,
+      };
+      // Auto-dropped if the column doesn't exist yet.
+      if (selected.id) payload.receiver_id = selected.id;
+      payload.message_type = file.type.startsWith("image") ? "image" : "file";
+
+      const { data, error: insErr } = await insertMessage(payload);
 
       if (insErr) {
         console.log("Attachment send error:", insErr.message);
@@ -1004,7 +1058,7 @@ export default function ChatPage() {
               ) : (
                 messages.map((msg) => {
                   const isMine = msg.sender_id === user?.id;
-                  const kind = msg.message_type || "text";
+                  const kind = classifyMessage(msg);
                   const bubbleStyle: React.CSSProperties = isMine
                     ? { backgroundColor: bubbleColor, color: "#111B21" }
                     : dark

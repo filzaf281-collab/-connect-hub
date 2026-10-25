@@ -20,21 +20,35 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-[#F0F2F5] dark:bg-[#111B21] flex flex-col">
       {/* Top bar */}
-      <header className="h-[59px] flex items-center justify-between px-6 border-b border-[#E9EDEF] dark:border-[#2A3942] bg-white dark:bg-[#202C33]">
+      <header className="h-[59px] flex items-center justify-between px-4 sm:px-6 border-b border-[#E9EDEF] dark:border-[#2A3942] bg-white dark:bg-[#202C33]">
         <div className="flex items-center gap-2">
           <MessageCircle size={24} className="text-[#00A884]" />
           <span className="text-lg font-bold text-[#111B21] dark:text-[#E9EDEF]">
             ConnectHub
           </span>
         </div>
-        <button
-          onClick={toggleTheme}
-          className="p-2 rounded-full text-[#667781] dark:text-[#8696A0] hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-          title="Toggle theme"
-          aria-label="Toggle theme"
-        >
-          {mounted && (theme === "light" ? <Moon size={20} /> : <Sun size={20} />)}
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/auth/signin"
+            className="px-4 py-2 rounded-lg text-sm font-medium text-[#111B21] dark:text-[#E9EDEF] hover:bg-black/5 dark:hover:bg-white/10 transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+          >
+            Login
+          </Link>
+          <Link
+            href="/auth/signup"
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-brand-500 hover:bg-brand-600 text-white transition-colors focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+          >
+            Sign Up
+          </Link>
+          <button
+            onClick={toggleTheme}
+            className="p-2 rounded-full text-[#667781] dark:text-[#8696A0] hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
+            title="Toggle theme"
+            aria-label="Toggle theme"
+          >
+            {mounted && (theme === "light" ? <Moon size={20} /> : <Sun size={20} />)}
+          </button>
+        </div>
       </header>
 
       {/* Hero */}
@@ -54,22 +68,22 @@ export default function HomePage() {
 
         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-sm sm:max-w-none">
           <Link
-            href="/auth/login"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-medium px-8 py-3.5 shadow-lg shadow-brand-500/30 hover:shadow-xl hover:shadow-brand-500/40 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+            href="/auth/signin"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-bold text-lg px-10 py-4 shadow-lg shadow-brand-500/30 hover:shadow-xl hover:shadow-brand-500/40 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
-            Sign In
-            <ArrowRight size={18} />
+            Start Chatting - Login
+            <ArrowRight size={20} />
           </Link>
           <Link
             href="/auth/signup"
-            className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-brand-500/60 text-brand-600 dark:text-brand-400 hover:bg-brand-500/10 hover:border-brand-500 font-medium px-8 py-3.5 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-brand-500/60 text-brand-600 dark:text-brand-400 hover:bg-brand-500/10 hover:border-brand-500 font-medium px-8 py-4 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
             Create Account
           </Link>
         </div>
 
         <p className="mt-10 text-sm text-[#667781] dark:text-[#8696A0]">
-          Already have an account? Click <span className="font-medium text-[#00A884]">Sign In</span> above.
+          Already have an account? Click <span className="font-medium text-[#00A884]">Login</span> above.
         </p>
       </main>
 

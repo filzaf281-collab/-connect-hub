@@ -37,6 +37,9 @@ interface Message {
   receiver_id?: string | null;
   content: string;
   message_type?: string | null; // "text" | "image" | "file"
+  is_read?: boolean | null; // read receipt: true once the RECEIVER opened the chat
+  read_at?: string | null;
+  delivered_at?: string | null;
   created_at: string;
 }
 
@@ -76,12 +79,15 @@ const WA_DOODLE =
 
 // ---------------------------------------------------------------------------
 // Resilient message insert.
-// The `messages` table may or may not have `receiver_id` / `message_type`
-// (they're added later via a SQL migration). We try with them first and drop
-// any column the schema cache reports as missing, so BOTH schemas work.
+// The `messages` table may or may not have these optional columns (they're
+// added later via SQL migrations). We try with them first and drop any column
+// the schema cache reports as missing, so BOTH schemas work.
 // ---------------------------------------------------------------------------
-const OPTIONAL_MSG_COLS = ["receiver_id", "message_type"];
+const OPTIONAL_MSG_COLS = ["receiver_id", "message_type", "is_read", "delivered_at"];
 const colSupported: Record<string, boolean> = {};
+// Flipped to false once we learn the read-receipt columns don't exist, so the
+// mark-as-read UPDATE isn't retried (and can't error) on every message.
+let readReceiptsSupported = true;
 
 async function insertMessage(payload: Record<string, any>) {
   const p: Record<string, any> = { ...payload };
@@ -102,12 +108,27 @@ async function insertMessage(payload: Record<string, any>) {
     if (flagged) {
       // Column doesn't exist yet → drop it and retry without it.
       colSupported[flagged] = false;
+      if (flagged === "is_read" || flagged === "delivered_at") readReceiptsSupported = false;
       delete p[flagged];
       continue;
     }
     return { data, error };
   }
   return { data: null, error: { message: "Could not insert message" } };
+}
+
+// ---------------------------------------------------------------------------
+// Read-receipt tick status for MY messages only:
+//   "sent"      → single grey tick   (inserted, no delivered_at yet)
+//   "delivered" → double grey tick   (delivered_at set)
+//   "read"      → double BLUE tick   (is_read === true)
+// Received messages return null (no ticks shown on them).
+// ---------------------------------------------------------------------------
+function getTickStatus(msg: Message, myId?: string | null): "sent" | "delivered" | "read" | null {
+  if (!myId || msg.sender_id !== myId) return null;
+  if (msg.is_read === true) return "read";
+  if (msg.delivered_at) return "delivered";
+  return "sent";
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +200,7 @@ export default function ChatPage() {
   const incomingCallRef = useRef<IncomingCall | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const chatChannelRef = useRef<any>(null);
+  const readReceiptsChannelRef = useRef<any>(null);
   const presenceChannelRef = useRef<any>(null);
   const callsChannelRef = useRef<any>(null);
 
@@ -397,6 +419,81 @@ export default function ChatPage() {
     };
   }, [user?.id, selected?.id]);
 
+  // Mark messages as READ — but only when the receiver actually opens the chat
+  // and views it (1s delay, so a mere flash of the tab doesn't count). Sending
+  // NEVER marks anything as read.
+  useEffect(() => {
+    const myId = user?.id;
+    const otherId = selected?.id;
+    if (!myId || !otherId || !readReceiptsSupported) return;
+
+    const markAsRead = async () => {
+      // Only rows where I am the RECEIVER and the open chat's user is the SENDER
+      const { error } = await supabase
+        .from("messages")
+        .update({ is_read: true, read_at: new Date().toISOString() })
+        .eq("receiver_id", myId)
+        .eq("sender_id", otherId)
+        .eq("is_read", false);
+      if (error) {
+        const msg = `${error.message || ""} ${error.details || ""}`;
+        if (/is_read|read_at|delivered_at/i.test(msg)) {
+          // Columns not migrated yet → disable receipts until SQL is run
+          readReceiptsSupported = false;
+          console.log("Read receipts inactive until the is_read migration runs");
+        } else {
+          console.log("Mark-as-read error:", error.message);
+        }
+        return;
+      }
+      // Reflect locally (same array ref when nothing changed → no effect loop)
+      setMessages((prev) => {
+        let changed = false;
+        const ts = new Date().toISOString();
+        const next = prev.map((m) => {
+          if (m.sender_id === otherId && m.receiver_id === myId && !m.is_read) {
+            changed = true;
+            return { ...m, is_read: true, read_at: ts };
+          }
+          return m;
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    // Re-arms when messages change, so new messages arriving while the chat is
+    // open get marked read after the same 1s "user is viewing" delay.
+    const timer = setTimeout(markAsRead, 1000);
+    return () => clearTimeout(timer);
+  }, [selected, user?.id, messages]);
+
+  // Realtime read receipts: when the RECEIVER marks my messages as read, their
+  // UPDATE arrives here and the sender's ticks flip live (grey → blue).
+  useEffect(() => {
+    const myId = user?.id;
+    if (!myId) return;
+    const channel = supabase
+      .channel("read-receipts")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages" },
+        (payload: any) => {
+          const m = payload.new as Message;
+          if (!m?.id) return;
+          if (m.sender_id !== myId) return; // only updates to MY sent messages
+          setMessages((prev) =>
+            prev.some((x) => x.id === m.id) ? prev.map((x) => (x.id === m.id ? { ...x, ...m } : x)) : prev
+          );
+        }
+      )
+      .subscribe();
+    readReceiptsChannelRef.current = channel;
+    return () => {
+      supabase.removeChannel(channel);
+      if (readReceiptsChannelRef.current === channel) readReceiptsChannelRef.current = null;
+    };
+  }, [user?.id]);
+
   // Realtime presence: who is online
   useEffect(() => {
     if (!user?.id) return;
@@ -570,6 +667,10 @@ export default function ChatPage() {
         sender_id: user.id,
         content: text,
         conversation_id: convIdRef.current,
+        // Read receipts: NEVER read on send — only the receiver marks it read
+        // after actually opening the chat. Auto-dropped if columns are missing.
+        is_read: false,
+        delivered_at: new Date().toISOString(),
       };
       // Only kept if the column exists; auto-dropped otherwise.
       if (selected.id) payload.receiver_id = selected.id;
@@ -630,6 +731,9 @@ export default function ChatPage() {
         sender_id: user.id,
         content: publicUrl,
         conversation_id: convIdRef.current,
+        // Same receipt rules as text messages: never read on send.
+        is_read: false,
+        delivered_at: new Date().toISOString(),
       };
       // Auto-dropped if the column doesn't exist yet.
       if (selected.id) payload.receiver_id = selected.id;
@@ -1104,6 +1208,7 @@ export default function ChatPage() {
                 messages.map((msg) => {
                   const isMine = msg.sender_id === user?.id;
                   const kind = classifyMessage(msg);
+                  const tick = getTickStatus(msg, user?.id);
                   const bubbleStyle: React.CSSProperties = isMine
                     ? { backgroundColor: bubbleColor, color: "#111B21" }
                     : dark
@@ -1144,12 +1249,12 @@ export default function ChatPage() {
                           style={{ color: isMine ? "#111B21" : undefined }}
                         >
                           {formatTime(msg.created_at)}
-                          {isMine &&
-                            (msg.id ? (
-                              <CheckCheck size={14} className="text-[#34B7F1]" />
-                            ) : (
-                              <Check size={14} />
-                            ))}
+                          {/* Ticks: single grey = sent, double grey = delivered, double BLUE = read */}
+                          {tick === "sent" && <Check size={14} style={{ color: "#667781" }} />}
+                          {tick === "delivered" && (
+                            <CheckCheck size={14} style={{ color: "#667781" }} />
+                          )}
+                          {tick === "read" && <CheckCheck size={14} style={{ color: "#53bdeb" }} />}
                         </div>
                       </div>
                     </div>

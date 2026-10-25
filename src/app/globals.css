@@ -11,6 +11,10 @@
     --border: #E5E7EB;
     --input: #FFFFFF;
     --input-focus: #E0E7FF;
+    /* Brand green (kept #00A884 as primary) */
+    --brand: #00A884;
+    --brand-strong: #008F72;
+    --brand-soft: rgba(0, 168, 132, 0.12);
   }
 
   .dark {
@@ -21,6 +25,10 @@
     --border: #2A3942;
     --input: #2A3942;
     --input-focus: #005C4B;
+    /* Slightly brighter green in dark mode for contrast */
+    --brand: #00C896;
+    --brand-strong: #00A884;
+    --brand-soft: rgba(0, 200, 150, 0.14);
   }
 
   * {
@@ -37,11 +45,42 @@
     color: var(--foreground);
     margin: 0;
     padding: 0;
+    /* Smooth light/dark switching */
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
 
   a {
     color: inherit;
     text-decoration: none;
+  }
+
+  /* Accessible, brand-colored focus ring everywhere */
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  /* Premium thin scrollbars */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(17, 27, 33, 0.18);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(17, 27, 33, 0.32);
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    background: rgba(233, 237, 239, 0.18);
+  }
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: rgba(233, 237, 239, 0.32);
   }
 
   .online-dot {
@@ -57,18 +96,33 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {
-  /* WhatsApp doodle pattern - Light */
+  /* Subtle, professional dot-grid chat texture - Light */
   .wa-doodle-light {
     background-color: #EFEAE2;
-    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23c8c3ba' fill-opacity='0.4'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cg fill='%23000000' fill-opacity='0.05'%3E%3Ccircle cx='5' cy='5' r='1.2'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 28px 28px;
+    background-repeat: repeat;
   }
 
-  /* WhatsApp doodle pattern - Dark */
+  /* Subtle, professional dot-grid chat texture - Dark */
   .wa-doodle-dark {
     background-color: #0B141A;
-    background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23182229' fill-opacity='0.6'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 28 28'%3E%3Cg fill='%23FFFFFF' fill-opacity='0.045'%3E%3Ccircle cx='5' cy='5' r='1.2'/%3E%3C/g%3E%3C/svg%3E");
+    background-size: 28px 28px;
+    background-repeat: repeat;
   }
 }

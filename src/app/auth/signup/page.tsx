@@ -96,7 +96,7 @@ export default function SignupPage() {
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               required
-              className="w-full bg-input border border-border rounded-lg px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-[#00A884]"
+              className="w-full bg-input border border-border rounded-xl px-4 py-3 text-foreground transition hover:border-brand-500/50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500"
             />
           </div>
 
@@ -108,7 +108,7 @@ export default function SignupPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="w-full bg-input border border-border rounded-lg px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-[#00A884]"
+              className="w-full bg-input border border-border rounded-xl px-4 py-3 text-foreground transition hover:border-brand-500/50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500"
             />
           </div>
 
@@ -121,14 +121,14 @@ export default function SignupPage() {
               onChange={(e) => setPassword(e.target.value)}
               minLength={6}
               required
-              className="w-full bg-input border border-border rounded-lg px-4 py-3 text-foreground focus:outline-none focus:ring-2 focus:ring-[#00A884]"
+              className="w-full bg-input border border-border rounded-xl px-4 py-3 text-foreground transition hover:border-brand-500/50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3 rounded-lg transition-colors disabled:opacity-50"
+            className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-[0.99] transition-all disabled:opacity-50 disabled:shadow-none"
           >
             {loading ? "Creating account..." : "Sign Up"}
           </button>

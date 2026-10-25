@@ -245,47 +245,57 @@ export default function ChatPage() {
   // Prevent hydration mismatch
   if (!mounted) {
     return (
-      <div className="h-screen flex bg-[#F0F2F5] dark:bg-[#111B21]">
+      <div className="h-screen flex bg-[#F0F2F5] dark:bg-[#111B21] animate-fade-in">
         <div className="flex-1 flex items-center justify-center">
-          <MessageCircle size={48} className="text-gray-400 animate-pulse" />
+          <MessageCircle size={48} className="text-brand-500 animate-pulse" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`h-screen flex ${theme === "dark" ? "bg-[#111B21]" : "bg-[#F0F2F5]"}`}>
+    <div className={`h-screen flex overflow-hidden ${theme === "dark" ? "bg-[#111B21]" : "bg-[#F0F2F5]"}`}>
       {/* Left Sidebar */}
-      <aside className={`w-[380px] flex flex-col h-screen border-r ${
+      <aside className={`${
+        selectedProfile ? "hidden md:flex" : "flex"
+      } flex-col w-full md:w-[380px] h-screen border-r shadow-lg z-10 ${
         theme === "dark" ? "bg-[#111B21] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
       }`}>
         {/* Header */}
         <div className={`h-[59px] flex items-center justify-between px-4 border-b ${
           theme === "dark" ? "bg-[#202C33] border-[#2A3942]" : "bg-[#F0F2F5] border-[#E9EDEF]"
         }`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-              theme === "dark" ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-gray-300 text-gray-700"
+          <div className="flex items-center gap-3 min-w-0">
+            <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-semibold ring-2 ring-brand-500/30 ${
+              theme === "dark" ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
             }`}>
               {user?.email?.charAt(0).toUpperCase() || "U"}
             </div>
-            <MessageCircle size={20} className={theme === "dark" ? "text-[#8696A0]" : "text-gray-600"} />
+            <div className="flex items-center gap-1.5 min-w-0">
+              <MessageCircle size={20} className="text-brand-500 shrink-0" />
+              <span className={`font-semibold truncate ${
+                theme === "dark" ? "text-[#E9EDEF]" : "text-[#111B21]"
+              }`}>
+                ConnectHub
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 shrink-0">
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
-              className={`p-2 rounded-full hover:bg-opacity-10 transition-colors ${
-                theme === "dark" ? "hover:bg-[#E9EDEF] text-[#8696A0]" : "hover:bg-[#111B21] text-gray-600"
-              }`}
               title="Toggle theme"
+              aria-label="Toggle theme"
+              className={`p-2 rounded-full transition-colors ${
+                theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10" : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+              }`}
             >
               {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
             </button>
             <button
               onClick={handleLogout}
-              className={`text-sm font-medium px-3 py-1 rounded transition-colors ${
-                theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF]" : "text-gray-600 hover:text-gray-900"
+              className={`text-sm font-medium px-3 py-1.5 rounded-full transition-colors ${
+                theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10" : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
               }`}
             >
               Logout
@@ -306,17 +316,17 @@ export default function ChatPage() {
               placeholder="Search or start new chat"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`w-full pl-10 pr-4 py-2 rounded-full text-sm focus:outline-none focus:ring-2 ${
+              className={`w-full pl-10 pr-4 py-2.5 rounded-full text-sm border border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/40 transition ${
                 theme === "dark"
-                  ? "bg-[#202C33] text-[#E9EDEF] placeholder-[#8696A0] focus:ring-[#005C4B]"
-                  : "bg-[#F0F2F5] text-[#111B21] placeholder-[#667781] focus:ring-[#00A884]"
+                  ? "bg-[#202C33] text-[#E9EDEF] placeholder-[#8696A0] hover:bg-[#2A3942]"
+                  : "bg-[#F0F2F5] text-[#111B21] placeholder-[#667781] hover:bg-[#E9EDEF]"
               }`}
             />
           </div>
         </div>
 
         {/* Chat List */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto py-2">
           {filteredProfiles.length === 0 ? (
             <div className={`text-center py-12 px-4 ${
               theme === "dark" ? "text-[#8696A0]" : "text-[#667781]"
@@ -329,21 +339,25 @@ export default function ChatPage() {
               <div
                 key={profile.id}
                 onClick={() => setSelectedProfile(profile)}
-                className={`flex items-center gap-3 p-3 cursor-pointer transition-colors ${
+                className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-2xl cursor-pointer transition-all duration-200 ${
                   selectedProfile?.id === profile.id
-                    ? theme === "dark" ? "bg-[#2A3942]" : "bg-[#F0F2F5]"
-                    : theme === "dark" ? "hover:bg-[#202C33]" : "hover:bg-[#F5F6F6]"
+                    ? theme === "dark"
+                      ? "bg-[#2A3942] shadow-md shadow-black/25"
+                      : "bg-[#F0F2F5] shadow-md shadow-black/5"
+                    : theme === "dark"
+                      ? "hover:bg-[#202C33] hover:shadow-sm hover:shadow-black/25"
+                      : "hover:bg-[#F5F6F6] hover:shadow-sm hover:shadow-black/5"
                 }`}
               >
                 {/* Avatar with online indicator */}
                 <div className="relative">
-                  <div className={`w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-semibold ${
-                    theme === "dark" ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-gray-300 text-gray-700"
+                  <div className={`w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-semibold ring-2 ring-brand-500/20 ${
+                    theme === "dark" ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
                   }`}>
                     {profile.full_name?.charAt(0).toUpperCase() || "U"}
                   </div>
                   {profile.is_online && (
-                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-[#111B21]"></div>
+                    <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-brand-500 rounded-full border-2 border-white dark:border-[#111B21] shadow-[0_0_6px_rgba(0,168,132,0.6)]"></div>
                   )}
                 </div>
 
@@ -367,17 +381,17 @@ export default function ChatPage() {
       </aside>
 
       {/* Right Main Area */}
-      <main className={`flex-1 flex flex-col ${
+      <main className={`${
+        selectedProfile ? "flex" : "hidden md:flex"
+      } flex-1 flex-col min-w-0 ${
         theme === "dark" ? "bg-[#0B141A]" : "bg-[#EFEAE2]"
       }`}>
         {!selectedProfile ? (
           /* Empty State */
-          <div className={`flex-1 flex flex-col items-center justify-center ${
+          <div className={`flex-1 flex flex-col items-center justify-center text-center px-6 animate-slide-up ${
             theme === "dark" ? "wa-doodle-dark text-[#8696A0]" : "wa-doodle-light text-[#667781]"
           }`}>
-            <MessageCircle size={72} className={`mb-4 ${
-              theme === "dark" ? "text-[#00A884]" : "text-[#00A884]"
-            }`} />
+            <MessageCircle size={72} className="mb-4 text-brand-500" />
             <h1 className={`text-4xl font-bold mb-3 ${
               theme === "dark" ? "text-[#E9EDEF]" : "text-[#111B21]"
             }`}>
@@ -395,14 +409,15 @@ export default function ChatPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setSelectedProfile(null)}
-                  className={`md:hidden p-1 ${
-                    theme === "dark" ? "text-[#8696A0]" : "text-gray-600"
+                  aria-label="Back to chats"
+                  className={`md:hidden p-2 rounded-full transition-colors ${
+                    theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10" : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
                   }`}
                 >
                   <ArrowLeft size={24} />
                 </button>
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                  theme === "dark" ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-gray-300 text-gray-700"
+                <div className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-semibold ring-2 ring-brand-500/30 ${
+                  theme === "dark" ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
                 }`}>
                   {selectedProfile.full_name?.charAt(0).toUpperCase() || "U"}
                 </div>
@@ -414,27 +429,36 @@ export default function ChatPage() {
                   </p>
                   <p className={`text-sm ${
                     selectedProfile.is_online
-                      ? "text-[#00A884]"
+                      ? "text-brand-500 font-medium"
                       : theme === "dark" ? "text-[#8696A0]" : "text-[#667781]"
                   }`}>
                     {selectedProfile.is_online ? "online" : "offline"}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-4">
-                <button className={`${
-                  theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF]" : "text-gray-600 hover:text-gray-900"
-                }`}>
+              <div className="flex items-center gap-1">
+                <button
+                  aria-label="Voice call"
+                  className={`p-2 rounded-full transition-colors ${
+                    theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10" : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+                  }`}
+                >
                   <Phone size={20} />
                 </button>
-                <button className={`${
-                  theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF]" : "text-gray-600 hover:text-gray-900"
-                }`}>
+                <button
+                  aria-label="Video call"
+                  className={`p-2 rounded-full transition-colors ${
+                    theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10" : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+                  }`}
+                >
                   <Video size={20} />
                 </button>
-                <button className={`${
-                  theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF]" : "text-gray-600 hover:text-gray-900"
-                }`}>
+                <button
+                  aria-label="More options"
+                  className={`p-2 rounded-full transition-colors ${
+                    theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10" : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+                  }`}
+                >
                   <MoreVertical size={20} />
                 </button>
               </div>
@@ -465,10 +489,10 @@ export default function ChatPage() {
                       className={`flex ${isMine ? "justify-end" : "justify-start"}`}
                     >
                       <div
-                        className={`max-w-[70%] rounded-[8px] shadow-sm px-3 py-2 ${
+                        className={`max-w-[75%] md:max-w-[70%] shadow-md px-3.5 py-2 animate-message-in ${
                           isMine
-                            ? theme === "dark" ? "bg-[#005C4B] text-[#E9EDEF]" : "bg-[#D9FDD3] text-[#111B21]"
-                            : theme === "dark" ? "bg-[#202C33] text-[#E9EDEF]" : "bg-white text-[#111B21]"
+                            ? `rounded-2xl rounded-tr-[4px] ${theme === "dark" ? "bg-[#005C4B] text-[#E9EDEF] shadow-black/25" : "bg-[#D9FDD3] text-[#111B21] shadow-black/5"}`
+                            : `rounded-2xl rounded-tl-[4px] ${theme === "dark" ? "bg-[#202C33] text-[#E9EDEF] shadow-black/25" : "bg-white text-[#111B21] shadow-black/5"}`
                         }`}
                       >
                         <p className="break-words">{msg.content}</p>
@@ -499,33 +523,40 @@ export default function ChatPage() {
               theme === "dark" ? "bg-[#202C33] border-[#2A3942]" : "bg-[#F0F2F5] border-[#E9EDEF]"
             }`}>
               <div className="flex items-center gap-2">
-                <button className={`p-2 ${
-                  theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF]" : "text-gray-600 hover:text-gray-900"
-                }`}>
+                <button
+                  aria-label="Emoji"
+                  className={`p-2 rounded-full transition-colors ${
+                    theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10" : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+                  }`}
+                >
                   <Smile size={24} />
                 </button>
-                <button className={`p-2 ${
-                  theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF]" : "text-gray-600 hover:text-gray-900"
-                }`}>
+                <button
+                  aria-label="Attach file"
+                  className={`p-2 rounded-full transition-colors ${
+                    theme === "dark" ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10" : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+                  }`}
+                >
                   <Paperclip size={24} />
                 </button>
-                <form onSubmit={handleSend} className="flex-1 flex gap-2">
+                <form onSubmit={handleSend} className="flex-1 flex items-center gap-2">
                   <input
                     type="text"
                     placeholder="Type a message"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    className={`flex-1 px-4 py-3 rounded-lg text-sm focus:outline-none focus:ring-2 ${
+                    className={`flex-1 px-4 py-3 rounded-full text-sm border focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/40 transition ${
                       theme === "dark"
-                        ? "bg-[#2A3942] text-[#E9EDEF] placeholder-[#8696A0] focus:ring-[#005C4B]"
-                        : "bg-white text-[#111B21] placeholder-[#667781] focus:ring-[#00A884]"
+                        ? "bg-[#2A3942] border-[#3B4A54] text-[#E9EDEF] placeholder-[#8696A0] hover:border-[#4A5A66]"
+                        : "bg-white border-[#E9EDEF] text-[#111B21] placeholder-[#667781] hover:border-[#D1D7DB]"
                     }`}
                   />
                   <button
                     type="submit"
+                    aria-label="Send message"
                     disabled={!input.trim()}
-                    className="px-4 py-3 bg-[#00A884] text-white rounded-lg font-medium hover:bg-[#008F72] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="p-3 rounded-full bg-brand-500 text-white shadow-lg shadow-brand-500/30 hover:bg-brand-600 hover:shadow-brand-500/40 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
                   >
                     <Send size={20} />
                   </button>

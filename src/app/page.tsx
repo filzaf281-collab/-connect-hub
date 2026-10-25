@@ -55,14 +55,14 @@ export default function HomePage() {
         <div className="flex flex-col sm:flex-row gap-4 w-full max-w-sm sm:max-w-none">
           <Link
             href="/auth/login"
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#00A884] hover:bg-[#008F72] text-white font-medium px-8 py-3 transition-colors"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-medium px-8 py-3.5 shadow-lg shadow-brand-500/30 hover:shadow-xl hover:shadow-brand-500/40 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
             Sign In
             <ArrowRight size={18} />
           </Link>
           <Link
             href="/auth/signup"
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-[#00A884] text-[#00A884] hover:bg-[#00A884]/10 font-medium px-8 py-3 transition-colors"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border-2 border-brand-500/60 text-brand-600 dark:text-brand-400 hover:bg-brand-500/10 hover:border-brand-500 font-medium px-8 py-3.5 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2"
           >
             Create Account
           </Link>

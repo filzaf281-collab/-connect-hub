@@ -31,6 +31,7 @@ export default function SignupPage() {
     });
 
     if (signUpError) {
+      console.log("Sign-up error:", signUpError.message);
       setError(signUpError.message);
       setLoading(false);
       return;
@@ -126,11 +127,26 @@ export default function SignupPage() {
           </div>
 
           <button
-            type="submit"
+            type="button"
+            onClick={handleSignup}
             disabled={loading}
-            className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-[0.99] transition-all disabled:opacity-50 disabled:shadow-none"
+            className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-[0.99] transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
           >
-            {loading ? "Creating account..." : "Sign Up"}
+            {loading ? (
+              <>
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+                  aria-hidden="true"
+                />
+                Creating account...
+              </>
+            ) : (
+              "Sign Up"
+            )}
+          </button>
+          {/* Hidden submit keeps Enter-to-submit working while the visible button is type="button" */}
+          <button type="submit" className="hidden" tabIndex={-1} aria-hidden="true">
+            Sign Up
           </button>
         </form>
 

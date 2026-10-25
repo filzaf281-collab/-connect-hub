@@ -26,91 +26,125 @@ interface Profile {
   id: string;
   email: string;
   full_name: string;
-  avatar_url: string | null;
-  created_at: string;
-  is_online?: boolean;
+  avatar_url?: string | null;
+  created_at?: string;
 }
 
 interface Message {
   id: string;
+  conversation_id?: string | null;
   sender_id: string;
   receiver_id?: string | null;
-  conversation_id?: string | null;
   content: string;
-  type?: string | null; // "text" | "image" | "file"
-  file_url?: string | null;
+  message_type?: string | null; // "text" | "image" | "file"
   created_at: string;
-  read_by?: string[];
 }
 
-interface CallState {
+interface ActiveCall {
   id: string;
   with: Profile;
   dir: "incoming" | "outgoing";
   status: "ringing" | "active";
 }
 
-const ENDED_STATUSES = ["rejected", "ended", "missed", "failed", "declined"];
+interface IncomingCall {
+  id: string;
+  caller_id: string;
+  receiver_id: string;
+  type?: string;
+  status: string;
+  with: Profile;
+}
+
+const ENDED_STATUSES = ["ended", "rejected", "missed", "declined", "failed", "cancelled"];
+
+// Wallpaper options (saved to localStorage, applied to the messages area)
+const wallpapers = [
+  { id: "default", bg: "#ffffff" },
+  { id: "whatsapp", bg: "#e5ddd5", pattern: true },
+  { id: "dark", bg: "#0b141a" },
+  { id: "blue", bg: "#d1e7ff" },
+  { id: "pink", bg: "#ffdde2" },
+];
+
+// Bubble color palette (applied via inline style)
+const bubbleColors = ["#dcf8c6", "#a8d8ea", "#e0bbe4", "#ffdfba"];
+
+// Simple subtle "doodle" pattern for the classic WhatsApp wallpaper
+const WA_DOODLE =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'%3E%3Cg fill='none' stroke='%23000000' stroke-opacity='0.05' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M14 18 q6 -10 16 -2 q4 8 -6 10 q-12 2 -10 -8'/%3E%3Crect x='52' y='12' width='20' height='14' rx='5'/%3E%3Cpath d='M56 26 l-3 6 l8 -5'/%3E%3Ccircle cx='108' cy='20' r='7'/%3E%3Cpath d='M104 44 h16 M112 40 l-6 8 M112 40 l6 8'/%3E%3Cpath d='M18 70 h16 v12 h-16 z M22 66 v4 M30 66 v4'/%3E%3Cpath d='M60 60 q10 -8 20 0 q4 10 -8 14 q-14 2 -12 -14'/%3E%3Ccircle cx='116' cy='74' r='6'/%3E%3Cpath d='M112 74 h8 M116 70 v8'/%3E%3Cpath d='M16 110 l10 -6 l10 6 v12 h-20 z'/%3E%3Cpath d='M58 108 h18 a4 4 0 0 1 4 4 v8 a4 4 0 0 1 -4 4 h-18 a4 4 0 0 1 -4 -4 v-8 a4 4 0 0 1 4 -4 z'/%3E%3Cpath d='M104 104 l8 8 l16 -18'/%3E%3C/g%3E%3C/svg%3E\")";
 
 export default function ChatPage() {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+
   const [user, setUser] = useState<any>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null);
+  const [selected, setSelected] = useState<Profile | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+  const [newMessage, setNewMessage] = useState("");
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [notice, setNotice] = useState("");
 
-  // Presence (who is online)
-  const [onlineIds, setOnlineIds] = useState<Set<string>>(new Set());
-
   // 3-dots menu
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Menu actions
+  // Menu-driven panels
   const [showContact, setShowContact] = useState(false);
-  const [wallpaper, setWallpaper] = useState(true);
+  const [showWallpaper, setShowWallpaper] = useState(false);
   const [blocked, setBlocked] = useState(false);
 
   // Emoji
   const [showEmoji, setShowEmoji] = useState(false);
   const emojiRef = useRef<HTMLDivElement>(null);
 
+  // Wallpaper + bubble theme (persisted)
+  const [wallpaperId, setWallpaperId] = useState("default");
+  const [bubbleColor, setBubbleColor] = useState("#dcf8c6");
+
   // Attach
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
   // Calls
-  const [call, setCall] = useState<CallState | null>(null);
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
+  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [micReady, setMicReady] = useState(false);
 
-  // Refs
+  // Refs (read inside long-lived realtime subscriptions)
   const scrollRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<any>(null);
-  const partnerRef = useRef<string | null>(null);
+  const selectedRef = useRef<Profile | null>(null);
   const profilesRef = useRef<Profile[]>([]);
-  const callRef = useRef<CallState | null>(null);
-  const messagesChannelRef = useRef<any>(null);
+  const convIdRef = useRef<string | null>(null);
+  const activeCallRef = useRef<ActiveCall | null>(null);
+  const incomingCallRef = useRef<IncomingCall | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const chatChannelRef = useRef<any>(null);
   const presenceChannelRef = useRef<any>(null);
   const callsChannelRef = useRef<any>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
 
-  const applyCall = (next: CallState | null) => {
-    callRef.current = next;
-    setCall(next);
+  const dark = theme === "dark";
+
+  const updateActiveCall = (v: ActiveCall | null) => {
+    activeCallRef.current = v;
+    setActiveCall(v);
+  };
+  const updateIncomingCall = (v: IncomingCall | null) => {
+    incomingCallRef.current = v;
+    setIncomingCall(v);
   };
 
-  // After mounting, we can show the theme toggle
+  // Mark mounted (avoids hydration mismatch for theme-dependent UI)
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Get current user
+  // Fetch current auth user
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user: u } }: any) => {
       if (u) {
@@ -122,156 +156,174 @@ export default function ChatPage() {
     });
   }, [router]);
 
-  // Fetch profiles except current user
+  // Load other users' profiles
   useEffect(() => {
     if (!user?.id) return;
-
-    const loadProfiles = async () => {
+    (async () => {
       try {
         const { data } = await supabase
           .from("profiles")
           .select("*")
           .neq("id", user.id)
           .order("full_name", { ascending: true });
-
         if (data) {
           const list = data as Profile[];
           profilesRef.current = list;
           setProfiles(list);
         }
       } catch {
-        /* ignore - profiles are non-critical */
+        /* non-critical */
       }
-    };
-
-    loadProfiles();
+    })();
   }, [user?.id]);
 
-  // Filter profiles based on search
-  const filteredProfiles = profiles.filter((profile) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      profile.full_name?.toLowerCase().includes(query) ||
-      profile.email?.toLowerCase().includes(query)
-    );
-  });
+  // Restore wallpaper + bubble color from localStorage
+  useEffect(() => {
+    if (!mounted) return;
+    try {
+      const w = localStorage.getItem("ch_wallpaper");
+      const b = localStorage.getItem("ch_bubble");
+      if (w) setWallpaperId(w);
+      if (b) setBubbleColor(b);
+    } catch {
+      /* storage may be unavailable */
+    }
+  }, [mounted]);
 
-  // Load messages exchanged with a specific user (by sender/receiver pair)
-  const loadMessages = async (otherId: string) => {
-    const myId = userRef.current?.id;
-    if (!myId) return;
+  // Find (or create) the conversation shared by the two users
+  const getOrCreateConversation = async (myId: string, otherId: string): Promise<string | null> => {
+    try {
+      const { data: mine } = await supabase
+        .from("conversation_participants")
+        .select("conversation_id")
+        .eq("user_id", myId);
+      const myConvIds = (mine || []).map((p: any) => p.conversation_id);
+
+      if (myConvIds.length > 0) {
+        const { data: otherPart } = await supabase
+          .from("conversation_participants")
+          .select("conversation_id, user_id")
+          .in("conversation_id", myConvIds)
+          .eq("user_id", otherId);
+        const shared = (otherPart || []).find((p: any) =>
+          myConvIds.includes(p.conversation_id)
+        );
+        if (shared) return shared.conversation_id;
+      }
+
+      // No shared conversation → create one + both participants
+      const { data: newConv, error: convErr } = await supabase
+        .from("conversations")
+        .insert({ created_by: myId })
+        .select()
+        .single();
+      if (convErr || !newConv) return null;
+
+      await supabase.from("conversation_participants").insert([
+        { conversation_id: newConv.id, user_id: myId },
+        { conversation_id: newConv.id, user_id: otherId },
+      ]);
+      return newConv.id;
+    } catch {
+      return null;
+    }
+  };
+
+  // Load messages for a conversation
+  const loadMessages = async (convId: string) => {
     setIsLoading(true);
     try {
       const { data } = await supabase
         .from("messages")
         .select("*")
-        .or(
-          `and(sender_id.eq.${myId},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${myId})`
-        )
+        .eq("conversation_id", convId)
         .order("created_at", { ascending: true });
-
-      if (data) {
-        const fetched = data as Message[];
-        setMessages((prev) => {
-          const map = new Map<string, Message>();
-          fetched.forEach((m) => map.set(m.id, m));
-          prev.forEach((m) => map.set(m.id, m));
-          return Array.from(map.values()).sort(
-            (a, b) =>
-              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-          );
-        });
-      }
+      if (data) setMessages(data as Message[]);
     } catch {
-      /* keep existing messages */
+      /* keep current messages */
     }
     setIsLoading(false);
   };
 
-  // When a chat is selected, reset state and load that conversation
+  // When a chat is opened: reset state, resolve conversation, load messages
   useEffect(() => {
-    partnerRef.current = selectedProfile?.id ?? null;
-    setMenuOpen(false);
+    selectedRef.current = selected;
+    setShowMenu(false);
     setShowEmoji(false);
     setShowContact(false);
+    setShowWallpaper(false);
     setBlocked(false);
 
-    if (selectedProfile && user?.id) {
+    if (selected && user?.id) {
       setMessages([]);
-      loadMessages(selectedProfile.id);
+      (async () => {
+        const convId = await getOrCreateConversation(user.id, selected.id);
+        convIdRef.current = convId;
+        if (convId) {
+          await loadMessages(convId);
+        } else {
+          console.log("Could not open conversation");
+          setNotice("Could not open conversation");
+        }
+      })();
     } else {
       setMessages([]);
+      convIdRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedProfile, user?.id]);
+  }, [selected, user?.id]);
 
-  // Realtime: new messages (channel "chat", client-side guard + dedupe)
+  // Realtime: new messages for the currently open conversation (deduped)
   useEffect(() => {
     if (!user?.id) return;
-
     const channel = supabase
-      .channel("chat")
+      .channel("chat-realtime")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
         (payload: any) => {
           const m = payload.new as Message;
-          const myId = userRef.current?.id;
-          const partner = partnerRef.current;
-          if (!m?.id || !myId || !partner) return;
-
-          const belongs =
-            (m.sender_id === myId && m.receiver_id === partner) ||
-            (m.sender_id === partner && m.receiver_id === myId);
-          if (!belongs) return;
-
-          setMessages((prev) =>
-            prev.some((x) => x.id === m.id) ? prev : [...prev, m]
-          );
+          if (!m?.id) return;
+          // Only append messages that belong to the open conversation
+          if (!convIdRef.current || m.conversation_id !== convIdRef.current) return;
+          setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
         }
       )
       .subscribe();
-
-    messagesChannelRef.current = channel;
-
+    chatChannelRef.current = channel;
     return () => {
-      if (messagesChannelRef.current) {
-        supabase.removeChannel(messagesChannelRef.current);
-        messagesChannelRef.current = null;
+      if (chatChannelRef.current) {
+        supabase.removeChannel(chatChannelRef.current);
+        chatChannelRef.current = null;
       }
     };
   }, [user?.id]);
 
-  // Realtime: presence (who is online)
+  // Realtime presence: who is online
   useEffect(() => {
     if (!user?.id) return;
     const myId = user.id;
-
-    const channel = supabase.channel("online");
-    channel
-      .on("presence", { event: "sync" }, () => {
+    const channel = supabase.channel("presence", {
+      config: { presence: { key: myId } },
+    });
+    channel.on("presence", { event: "sync" }, () => {
+      try {
+        const state = channel.presenceState() as Record<string, unknown>;
+        setOnlineUsers(Object.keys(state));
+      } catch {
+        /* ignore */
+      }
+    });
+    channel.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
         try {
-          const state = channel.presenceState() as Record<string, any[]>;
-          const ids = new Set<string>();
-          Object.values(state).forEach((instances) => {
-            instances.forEach((inst: any) => {
-              if (inst?.user_id) ids.add(inst.user_id);
-            });
-          });
-          setOnlineIds(ids);
+          await channel.track({ user_id: myId, online: true });
         } catch {
-          /* ignore presence parse issues */
+          /* ignore */
         }
-      })
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          channel.track({ user_id: myId, online: true }).catch(() => {});
-        }
-      });
-
+      }
+    });
     presenceChannelRef.current = channel;
-
     return () => {
       if (presenceChannelRef.current) {
         supabase.removeChannel(presenceChannelRef.current);
@@ -280,7 +332,7 @@ export default function ChatPage() {
     };
   }, [user?.id]);
 
-  // Realtime: microphone helpers
+  // Microphone helpers (voice calls)
   const startMic = async () => {
     if (localStreamRef.current) return;
     try {
@@ -290,7 +342,8 @@ export default function ChatPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
       setMicReady(true);
-    } catch {
+    } catch (err: any) {
+      console.log("Microphone unavailable:", err?.message);
       setMicReady(false);
       setNotice("Microphone unavailable");
     }
@@ -304,54 +357,68 @@ export default function ChatPage() {
     setMicReady(false);
   };
 
-  // Realtime: calls (incoming ring + status updates)
+  // Realtime: calls (incoming ring + status updates both ways)
   useEffect(() => {
     if (!user?.id) return;
     const myId = user.id;
 
     const channel = supabase
-      .channel("calls-watcher")
+      .channel("calls")
+      // Someone is calling me
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "calls" },
+        { event: "INSERT", schema: "public", table: "calls", filter: `receiver_id=eq.${myId}` },
         (payload: any) => {
           const c = payload.new;
           if (!c?.id) return;
-          // Incoming call placed to me, and I'm not already in a call
-          if (c.callee_id === myId && c.status === "ringing" && !callRef.current) {
-            const caller =
-              profilesRef.current.find((p) => p.id === c.caller_id) || {
-                id: c.caller_id,
-                email: "",
-                full_name: "Incoming call",
-                avatar_url: null,
-                created_at: "",
-              };
-            applyCall({ id: c.id, with: caller, dir: "incoming", status: "ringing" });
-          }
+          if (activeCallRef.current || incomingCallRef.current) return;
+          const caller =
+            profilesRef.current.find((p) => p.id === c.caller_id) || {
+              id: c.caller_id,
+              email: "",
+              full_name: "Incoming call",
+              avatar_url: null,
+            };
+          updateIncomingCall({ ...c, with: caller } as IncomingCall);
         }
       )
+      // My outgoing call changed status (accepted / ended / rejected)
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "calls" },
+        { event: "UPDATE", schema: "public", table: "calls", filter: `caller_id=eq.${myId}` },
         (payload: any) => {
           const c = payload.new;
-          const cur = callRef.current;
+          const cur = activeCallRef.current;
           if (!c?.id || !cur || cur.id !== c.id) return;
-
           if (c.status === "active") {
-            applyCall({ ...cur, status: "active" });
+            updateActiveCall({ ...cur, status: "active" });
             startMic();
           } else if (ENDED_STATUSES.includes(c.status)) {
             stopMic();
-            applyCall(null);
+            updateActiveCall(null);
+          }
+        }
+      )
+      // A call I'm receiving ended (caller hung up / cancelled)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "calls", filter: `receiver_id=eq.${myId}` },
+        (payload: any) => {
+          const c = payload.new;
+          if (!c?.id) return;
+          const cur = activeCallRef.current;
+          if (cur && cur.id === c.id && ENDED_STATUSES.includes(c.status)) {
+            stopMic();
+            updateActiveCall(null);
+          }
+          const inc = incomingCallRef.current;
+          if (inc && inc.id === c.id && ENDED_STATUSES.includes(c.status)) {
+            updateIncomingCall(null);
           }
         }
       )
       .subscribe();
-
     callsChannelRef.current = channel;
-
     return () => {
       if (callsChannelRef.current) {
         supabase.removeChannel(callsChannelRef.current);
@@ -361,11 +428,11 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // Close 3-dots menu / emoji picker on outside click
+  // Close the 3-dots menu / emoji picker on outside click
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (menuRef.current && !menuRef.current.contains(target)) setMenuOpen(false);
+      if (menuRef.current && !menuRef.current.contains(target)) setShowMenu(false);
       if (emojiRef.current && !emojiRef.current.contains(target)) setShowEmoji(false);
     };
     document.addEventListener("mousedown", onDocClick);
@@ -379,14 +446,12 @@ export default function ChatPage() {
     return () => clearTimeout(t);
   }, [notice]);
 
-  // Scroll to bottom on new messages
+  // Keep scrolled to the newest message
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    if (scrollRef.current) scrollRef.current.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Stop microphone + cleanup on unmount
+  // Stop mic + channels on unmount
   useEffect(() => {
     return () => {
       if (localStreamRef.current) {
@@ -396,38 +461,40 @@ export default function ChatPage() {
     };
   }, []);
 
-  // Send a text message
+  // --- Messaging ---
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const text = input.trim();
-    if (!text || !user?.id || !selectedProfile || blocked) return;
+    const text = newMessage.trim();
+    if (!text || !user?.id || !selected) return;
 
     try {
       const { data, error } = await supabase
         .from("messages")
         .insert({
           sender_id: user.id,
-          receiver_id: selectedProfile.id,
+          receiver_id: selected.id,
           content: text,
+          conversation_id: convIdRef.current,
         })
-        .select()
-        .single();
+        .select();
 
-      if (error || !data) {
-        setNotice("Could not send message");
+      if (error) {
+        console.log("Send error:", error.message);
+        alert(error.message);
         return;
       }
 
-      setInput("");
-      setMessages((prev) =>
-        prev.some((x) => x.id === data.id) ? prev : [...prev, data as Message]
-      );
-    } catch {
-      setNotice("Could not send message");
+      const row = data?.[0] as Message | undefined;
+      setNewMessage("");
+      if (row) {
+        setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
+      }
+    } catch (err: any) {
+      console.log("Send error:", err?.message);
+      alert(err?.message || "Failed to send message");
     }
   };
 
-  // Handle Enter key
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -435,174 +502,193 @@ export default function ChatPage() {
     }
   };
 
-  // Emoji click -> append to input
-  const onEmojiClick = (emojiData: EmojiClickData) => {
-    setInput((prev) => prev + emojiData.emoji);
+  // --- Emoji ---
+  const onEmojiClick = (e: EmojiClickData) => {
+    setNewMessage((prev) => prev + e.emoji);
   };
 
-  // Attach: upload to Supabase Storage then send as an image/file message
+  // --- Attach (upload to storage, then send as image/file message) ---
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file || !user?.id || !selectedProfile) return;
+    if (!file || !user?.id || !selected) return;
 
     setUploading(true);
     try {
-      const ext = file.name.includes(".")
-        ? file.name.split(".").pop()!
-        : "bin";
-      const path = `${user.id}/${Date.now()}_${Math.random()
-        .toString(36)
-        .slice(2, 8)}.${ext}`;
-
-      const { error: upErr } = await supabase.storage
-        .from("chat-files")
-        .upload(path, file);
-      if (upErr) {
-        setNotice("Upload failed");
+      const fileName = `${Date.now()}_${file.name}`;
+      const { error } = await supabase.storage.from("chat-files").upload(fileName, file);
+      if (error) {
+        console.log("Upload error:", error.message);
+        alert(error.message);
         return;
       }
 
-      const { data: pub } = supabase.storage.from("chat-files").getPublicUrl(path);
-      const url = pub?.publicUrl;
-      if (!url) {
-        setNotice("Upload failed");
-        return;
-      }
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("chat-files").getPublicUrl(fileName);
 
-      const isImage = file.type.startsWith("image/");
-      const { data: inserted, error: insErr } = await supabase
+      const { data, error: insErr } = await supabase
         .from("messages")
         .insert({
           sender_id: user.id,
-          receiver_id: selectedProfile.id,
-          content: url,
-          type: isImage ? "image" : "file",
+          receiver_id: selected.id,
+          content: publicUrl,
+          message_type: file.type.startsWith("image") ? "image" : "file",
+          conversation_id: convIdRef.current,
         })
-        .select()
-        .single();
+        .select();
 
-      if (insErr || !inserted) {
-        setNotice("Could not send attachment");
+      if (insErr) {
+        console.log("Attachment send error:", insErr.message);
+        alert(insErr.message);
         return;
       }
 
-      setMessages((prev) =>
-        prev.some((x) => x.id === inserted.id) ? prev : [...prev, inserted as Message]
-      );
-    } catch {
-      setNotice("Upload failed");
+      const row = data?.[0] as Message | undefined;
+      if (row) setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
+    } catch (err: any) {
+      console.log("Upload error:", err?.message);
+      alert(err?.message || "Upload failed");
     } finally {
       setUploading(false);
     }
   };
 
-  // Calls
+  // --- Calls ---
   const startCall = async () => {
-    if (!user?.id || !selectedProfile || callRef.current) return;
+    if (!user?.id || !selected || activeCall || incomingCall) return;
     try {
       const { data, error } = await supabase
         .from("calls")
         .insert({
           caller_id: user.id,
-          callee_id: selectedProfile.id,
+          receiver_id: selected.id,
+          type: "voice",
           status: "ringing",
         })
         .select()
         .single();
 
       if (error || !data) {
-        setNotice("Unable to start call");
+        console.log("Call error:", error?.message);
+        alert(error?.message || "Unable to start call");
         return;
       }
-      applyCall({
-        id: data.id,
-        with: selectedProfile,
-        dir: "outgoing",
-        status: "ringing",
-      });
-    } catch {
-      setNotice("Unable to start call");
+      updateActiveCall({ id: data.id, with: selected, dir: "outgoing", status: "ringing" });
+    } catch (err: any) {
+      console.log("Call error:", err?.message);
+      alert(err?.message || "Unable to start call");
     }
   };
 
   const acceptCall = async () => {
-    const cur = callRef.current;
-    if (!cur) return;
+    const c = incomingCallRef.current;
+    if (!c) return;
     try {
-      await supabase.from("calls").update({ status: "active" }).eq("id", cur.id);
+      await supabase.from("calls").update({ status: "active" }).eq("id", c.id);
     } catch {
       /* still show as active locally */
     }
-    applyCall({ ...cur, status: "active" });
+    updateActiveCall({ id: c.id, with: c.with, dir: "incoming", status: "active" });
+    updateIncomingCall(null);
     startMic();
   };
 
   const rejectCall = async () => {
-    const cur = callRef.current;
-    if (!cur) return;
+    const c = incomingCallRef.current;
+    if (!c) return;
     try {
-      await supabase.from("calls").update({ status: "rejected" }).eq("id", cur.id);
+      await supabase.from("calls").update({ status: "rejected" }).eq("id", c.id);
     } catch {
       /* ignore */
     }
-    applyCall(null);
+    updateIncomingCall(null);
   };
 
   const endCall = async () => {
-    const cur = callRef.current;
-    if (!cur) return;
+    const c = activeCallRef.current;
+    if (!c) return;
     try {
-      await supabase.from("calls").update({ status: "ended" }).eq("id", cur.id);
+      await supabase.from("calls").update({ status: "ended" }).eq("id", c.id);
     } catch {
       /* ignore */
     }
     stopMic();
-    applyCall(null);
+    updateActiveCall(null);
   };
 
-  // Menu actions
-  const menuItemClass = (dark: boolean) =>
+  // --- 3-dots menu actions ---
+  const menuItemClass = (isDark: boolean) =>
     `w-full text-left px-4 py-2.5 text-sm cursor-pointer transition-colors ${
-      dark
-        ? "text-[#E9EDEF] hover:bg-white/10"
-        : "text-[#111B21] hover:bg-black/5"
+      isDark ? "text-[#E9EDEF] hover:bg-white/10" : "text-[#111B21] hover:bg-black/5"
     }`;
 
   const onMenuItem = (action: string) => {
-    setMenuOpen(false);
+    setShowMenu(false);
     if (action === "view") setShowContact(true);
-    else if (action === "wallpaper") setWallpaper((w) => !w);
+    else if (action === "wallpaper") setShowWallpaper(true);
     else if (action === "clear") setMessages([]);
     else if (action === "block") setBlocked((b) => !b);
+    else if (action === "report") setNotice("Reported. Our team will review this account.");
   };
 
-  // Logout
-  const handleLogout = async () => {
+  // --- Wallpaper / bubble persistence ---
+  const selectWallpaper = (id: string) => {
+    setWallpaperId(id);
+    try {
+      localStorage.setItem("ch_wallpaper", id);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const selectBubble = (color: string) => {
+    setBubbleColor(color);
+    try {
+      localStorage.setItem("ch_bubble", color);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  // --- Misc ---
+  const handleSignOut = async () => {
     await supabase.auth.signOut();
     router.push("/auth/signin");
   };
 
-  // Toggle theme
-  const toggleTheme = () => {
-    setTheme(theme === "light" ? "dark" : "light");
-  };
+  const toggleTheme = () => setTheme(dark ? "light" : "dark");
 
-  // Format time
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  };
+  const formatTime = (dateStr: string) =>
+    new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-  const isOnline = (id: string) => onlineIds.has(id);
+  const isOnline = (id: string) => onlineUsers.includes(id);
 
   const fileNameFromUrl = (url: string) => {
     try {
-      const last = url.split("/").pop() || url;
-      return decodeURIComponent(last);
+      return decodeURIComponent(url.split("/").pop() || "attachment");
     } catch {
       return "attachment";
     }
+  };
+
+  const filteredProfiles = profiles.filter((p) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      p.full_name?.toLowerCase().includes(q) || p.email?.toLowerCase().includes(q)
+    );
+  });
+
+  // Wallpaper background applied to the messages area
+  const activeWallpaper = wallpapers.find((w) => w.id === wallpaperId) || wallpapers[0];
+  const wallpaperBg =
+    activeWallpaper.id === "default" ? (dark ? "#0b141a" : "#ffffff") : activeWallpaper.bg;
+  const messagesAreaStyle: React.CSSProperties = {
+    backgroundColor: wallpaperBg,
+    backgroundImage: activeWallpaper.pattern ? WA_DOODLE : undefined,
+    backgroundSize: activeWallpaper.pattern ? "140px 140px" : undefined,
+    backgroundRepeat: activeWallpaper.pattern ? "repeat" : undefined,
   };
 
   // Prevent hydration mismatch
@@ -616,19 +702,16 @@ export default function ChatPage() {
     );
   }
 
-  const dark = theme === "dark";
-
   return (
-    <div className={`h-screen flex overflow-hidden ${dark ? "bg-[#111B21]" : "bg-[#F0F2F5]"}`}>
-      {/* Left Sidebar */}
+    <div className="h-screen flex overflow-hidden">
+      {/* Left sidebar */}
       <aside
         className={`${
-          selectedProfile ? "hidden md:flex" : "flex"
+          selected ? "hidden md:flex" : "flex"
         } flex-col w-full md:w-[380px] h-screen border-r shadow-lg z-10 ${
           dark ? "bg-[#111B21] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
         }`}
       >
-        {/* Header */}
         <div
           className={`h-[59px] flex items-center justify-between px-4 border-b ${
             dark ? "bg-[#202C33] border-[#2A3942]" : "bg-[#F0F2F5] border-[#E9EDEF]"
@@ -644,7 +727,11 @@ export default function ChatPage() {
             </div>
             <div className="flex items-center gap-1.5 min-w-0">
               <MessageCircle size={20} className="text-brand-500 shrink-0" />
-              <span className={`font-semibold truncate ${dark ? "text-[#E9EDEF]" : "text-[#111B21]"}`}>
+              <span
+                className={`font-semibold truncate ${
+                  dark ? "text-[#E9EDEF]" : "text-[#111B21]"
+                }`}
+              >
                 ConnectHub
               </span>
             </div>
@@ -660,10 +747,10 @@ export default function ChatPage() {
                   : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
               }`}
             >
-              {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
+              {dark ? <Moon size={20} /> : <Sun size={20} />}
             </button>
             <button
-              onClick={handleLogout}
+              onClick={handleSignOut}
               className={`text-sm font-medium px-3 py-1.5 rounded-full transition-colors ${
                 dark
                   ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
@@ -675,7 +762,6 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Search Box */}
         <div
           className={`p-3 border-b ${
             dark ? "bg-[#111B21] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
@@ -702,10 +788,11 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* Chat List */}
         <div className="flex-1 overflow-y-auto py-2">
           {filteredProfiles.length === 0 ? (
-            <div className={`text-center py-12 px-4 ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
+            <div
+              className={`text-center py-12 px-4 ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}
+            >
               <p className="text-lg font-medium mb-2">Tap to start chatting</p>
               <p className="text-sm">No users found</p>
             </div>
@@ -713,9 +800,9 @@ export default function ChatPage() {
             filteredProfiles.map((profile) => (
               <div
                 key={profile.id}
-                onClick={() => setSelectedProfile(profile)}
+                onClick={() => setSelected(profile)}
                 className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-2xl cursor-pointer transition-all duration-200 ${
-                  selectedProfile?.id === profile.id
+                  selected?.id === profile.id
                     ? dark
                       ? "bg-[#2A3942] shadow-md shadow-black/25"
                       : "bg-[#F0F2F5] shadow-md shadow-black/5"
@@ -724,7 +811,6 @@ export default function ChatPage() {
                       : "hover:bg-[#F5F6F6] hover:shadow-sm hover:shadow-black/5"
                 }`}
               >
-                {/* Avatar with online indicator */}
                 <div className="relative">
                   <div
                     className={`w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-semibold ring-2 ring-brand-500/20 ${
@@ -734,13 +820,15 @@ export default function ChatPage() {
                     {profile.full_name?.charAt(0).toUpperCase() || "U"}
                   </div>
                   {isOnline(profile.id) && (
-                    <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-brand-500 rounded-full border-2 border-white dark:border-[#111B21] shadow-[0_0_6px_rgba(0,168,132,0.6)]"></div>
+                    <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white dark:border-[#111B21] shadow-[0_0_8px_#10B981]"></span>
                   )}
                 </div>
-
-                {/* Name and status */}
                 <div className="flex-1 min-w-0">
-                  <p className={`font-semibold truncate ${dark ? "text-[#E9EDEF]" : "text-[#111B21]"}`}>
+                  <p
+                    className={`font-semibold truncate ${
+                      dark ? "text-[#E9EDEF]" : "text-[#111B21]"
+                    }`}
+                  >
                     {profile.full_name || "Unknown User"}
                   </p>
                   <p className={`text-sm truncate ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
@@ -753,21 +841,22 @@ export default function ChatPage() {
         </div>
       </aside>
 
-      {/* Right Main Area */}
+      {/* Right main area */}
       <main
         className={`${
-          selectedProfile ? "flex" : "hidden md:flex"
+          selected ? "flex" : "hidden md:flex"
         } flex-1 flex-col min-w-0 ${dark ? "bg-[#0B141A]" : "bg-[#EFEAE2]"}`}
       >
-        {!selectedProfile ? (
-          /* Empty State */
+        {!selected ? (
           <div
             className={`flex-1 flex flex-col items-center justify-center text-center px-6 animate-slide-up ${
               dark ? "wa-doodle-dark text-[#8696A0]" : "wa-doodle-light text-[#667781]"
             }`}
           >
             <MessageCircle size={72} className="mb-4 text-brand-500" />
-            <h1 className={`text-4xl font-bold mb-3 ${dark ? "text-[#E9EDEF]" : "text-[#111B21]"}`}>
+            <h1
+              className={`text-4xl font-bold mb-3 ${dark ? "text-[#E9EDEF]" : "text-[#111B21]"}`}
+            >
               ConnectHub Web
             </h1>
             <p className="text-lg">Professional communication platform</p>
@@ -775,7 +864,7 @@ export default function ChatPage() {
           </div>
         ) : (
           <>
-            {/* Chat Header */}
+            {/* Chat header */}
             <div
               className={`h-[59px] flex items-center justify-between px-4 border-b ${
                 dark ? "bg-[#202C33] border-[#2A3942]" : "bg-[#F0F2F5] border-[#E9EDEF]"
@@ -783,7 +872,7 @@ export default function ChatPage() {
             >
               <div className="flex items-center gap-3 min-w-0">
                 <button
-                  onClick={() => setSelectedProfile(null)}
+                  onClick={() => setSelected(null)}
                   aria-label="Back to chats"
                   className={`md:hidden p-2 rounded-full transition-colors ${
                     dark
@@ -798,25 +887,29 @@ export default function ChatPage() {
                     dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
                   }`}
                 >
-                  {selectedProfile.full_name?.charAt(0).toUpperCase() || "U"}
+                  {selected.full_name?.charAt(0).toUpperCase() || "U"}
                 </div>
                 <div className="min-w-0">
-                  <p className={`font-semibold truncate ${dark ? "text-[#E9EDEF]" : "text-[#111B21]"}`}>
-                    {selectedProfile.full_name || "Unknown User"}
+                  <p
+                    className={`font-semibold truncate ${
+                      dark ? "text-[#E9EDEF]" : "text-[#111B21]"
+                    }`}
+                  >
+                    {selected.full_name || "Unknown User"}
                     {blocked && (
                       <span className="ml-2 text-xs font-normal text-red-500">(blocked)</span>
                     )}
                   </p>
                   <p
                     className={`text-sm ${
-                      isOnline(selectedProfile.id)
+                      isOnline(selected.id)
                         ? "text-brand-500 font-medium"
                         : dark
                           ? "text-[#8696A0]"
                           : "text-[#667781]"
                     }`}
                   >
-                    {isOnline(selectedProfile.id) ? "online" : "offline"}
+                    {isOnline(selected.id) ? "online" : "offline"}
                   </p>
                 </div>
               </div>
@@ -848,9 +941,9 @@ export default function ChatPage() {
                 {/* 3-dots menu (closes on outside click) */}
                 <div ref={menuRef} className="relative">
                   <button
-                    onClick={() => setMenuOpen((o) => !o)}
+                    onClick={() => setShowMenu((v) => !v)}
                     aria-label="More options"
-                    aria-expanded={menuOpen}
+                    aria-expanded={showMenu}
                     className={`p-2 rounded-full transition-colors ${
                       dark
                         ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
@@ -860,19 +953,20 @@ export default function ChatPage() {
                     <MoreVertical size={20} />
                   </button>
 
-                  {menuOpen && (
+                  {showMenu && (
                     <div
-                      className={`absolute right-0 top-full mt-1 w-48 rounded-xl border shadow-lg z-50 py-1 overflow-hidden ${
-                        dark
-                          ? "bg-[#202C33] border-[#3B4A54]"
-                          : "bg-white border-[#E9EDEF]"
+                      className={`absolute right-0 top-full mt-1 w-52 rounded-xl border shadow-lg z-50 py-1 overflow-hidden ${
+                        dark ? "bg-[#202C33] border-[#3B4A54]" : "bg-white border-[#E9EDEF]"
                       }`}
                     >
                       <button className={menuItemClass(dark)} onClick={() => onMenuItem("view")}>
                         View Contact
                       </button>
-                      <button className={menuItemClass(dark)} onClick={() => onMenuItem("wallpaper")}>
-                        Wallpaper {wallpaper ? "(on)" : "(off)"}
+                      <button
+                        className={menuItemClass(dark)}
+                        onClick={() => onMenuItem("wallpaper")}
+                      >
+                        Change Wallpaper
                       </button>
                       <button className={menuItemClass(dark)} onClick={() => onMenuItem("clear")}>
                         Clear Chat
@@ -883,7 +977,13 @@ export default function ChatPage() {
                         }`}
                         onClick={() => onMenuItem("block")}
                       >
-                        {blocked ? "Unblock" : "Block"}
+                        {blocked ? "Unblock User" : "Block User"}
+                      </button>
+                      <button
+                        className={`${menuItemClass(dark)} text-red-500`}
+                        onClick={() => onMenuItem("report")}
+                      >
+                        Report
                       </button>
                     </div>
                   )}
@@ -891,30 +991,25 @@ export default function ChatPage() {
               </div>
             </div>
 
-            {/* Messages Area with doodle background */}
-            <div
-              className={`flex-1 overflow-y-auto p-4 space-y-2 ${
-                wallpaper
-                  ? dark
-                    ? "wa-doodle-dark"
-                    : "wa-doodle-light"
-                  : dark
-                    ? "bg-[#0B141A]"
-                    : "bg-[#EFEAE2]"
-              }`}
-            >
+            {/* Messages area (wallpaper applied via style) */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2" style={messagesAreaStyle}>
               {isLoading ? (
-                <div className={`text-center py-8 ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
+                <div className="text-center py-8 text-[#667781] dark:text-[#8696A0]">
                   Loading messages...
                 </div>
               ) : messages.length === 0 ? (
-                <div className={`text-center py-8 ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
+                <div className="text-center py-8 text-[#667781] dark:text-[#8696A0]">
                   No messages yet. Start the conversation!
                 </div>
               ) : (
                 messages.map((msg) => {
                   const isMine = msg.sender_id === user?.id;
-                  const kind = msg.type || "text";
+                  const kind = msg.message_type || "text";
+                  const bubbleStyle: React.CSSProperties = isMine
+                    ? { backgroundColor: bubbleColor, color: "#111B21" }
+                    : dark
+                      ? { backgroundColor: "#202C33", color: "#E9EDEF" }
+                      : { backgroundColor: "#ffffff", color: "#111B21" };
                   return (
                     <div
                       key={msg.id}
@@ -922,18 +1017,9 @@ export default function ChatPage() {
                     >
                       <div
                         className={`max-w-[75%] md:max-w-[70%] shadow-md px-3.5 py-2 animate-message-in ${
-                          isMine
-                            ? `rounded-2xl rounded-tr-[4px] ${
-                                dark
-                                  ? "bg-[#005C4B] text-[#E9EDEF] shadow-black/25"
-                                  : "bg-[#D9FDD3] text-[#111B21] shadow-black/5"
-                              }`
-                            : `rounded-2xl rounded-tl-[4px] ${
-                                dark
-                                  ? "bg-[#202C33] text-[#E9EDEF] shadow-black/25"
-                                  : "bg-white text-[#111B21] shadow-black/5"
-                              }`
+                          isMine ? "rounded-2xl rounded-tr-[4px]" : "rounded-2xl rounded-tl-[4px]"
                         }`}
+                        style={bubbleStyle}
                       >
                         {kind === "image" ? (
                           <img
@@ -955,14 +1041,13 @@ export default function ChatPage() {
                           <p className="break-words whitespace-pre-wrap">{msg.content}</p>
                         )}
                         <div
-                          className={`flex items-center justify-end gap-1 text-[11px] mt-1 ${
-                            dark ? "text-[#8696A0]" : "text-[#667781]"
-                          }`}
+                          className="flex items-center justify-end gap-1 text-[11px] mt-1 opacity-70"
+                          style={{ color: isMine ? "#111B21" : undefined }}
                         >
                           {formatTime(msg.created_at)}
                           {isMine &&
-                            (msg.read_by && msg.read_by.length > 1 ? (
-                              <CheckCheck size={14} className="text-[#53BDEB]" />
+                            (msg.id ? (
+                              <CheckCheck size={14} className="text-[#34B7F1]" />
                             ) : (
                               <Check size={14} />
                             ))}
@@ -975,14 +1060,18 @@ export default function ChatPage() {
               <div ref={scrollRef}></div>
             </div>
 
-            {/* Message Composer */}
+            {/* Composer */}
             <div
               className={`p-3 border-t ${
                 dark ? "bg-[#202C33] border-[#2A3942]" : "bg-[#F0F2F5] border-[#E9EDEF]"
               }`}
             >
               {blocked && (
-                <p className={`text-xs mb-2 ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
+                <p
+                  className={`text-xs mb-2 ${
+                    dark ? "text-[#8696A0]" : "text-[#667781]"
+                  }`}
+                >
                   You blocked this contact. Choose Unblock in the menu to reply.
                 </p>
               )}
@@ -990,7 +1079,7 @@ export default function ChatPage() {
                 {/* Emoji (closes on outside click) */}
                 <div ref={emojiRef} className="relative">
                   <button
-                    onClick={() => setShowEmoji((s) => !s)}
+                    onClick={() => setShowEmoji((v) => !v)}
                     aria-label="Emoji"
                     aria-expanded={showEmoji}
                     className={`p-2 rounded-full transition-colors ${
@@ -1002,19 +1091,18 @@ export default function ChatPage() {
                     <Smile size={24} />
                   </button>
                   {showEmoji && (
-                    <div className="absolute bottom-full left-0 mb-2 z-50">
+                    <div style={{ position: "absolute", bottom: "60px", zIndex: 50 }}>
                       <EmojiPicker
-                        theme={dark ? "dark" : "light"}
                         onEmojiClick={onEmojiClick}
+                        theme={dark ? "dark" : "light"}
                         width={300}
                         height={360}
-                        previewConfig={{ showPreview: false }}
                       />
                     </div>
                   )}
                 </div>
 
-                {/* Attach */}
+                {/* Attach / Pin */}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Attach file"
@@ -1039,8 +1127,8 @@ export default function ChatPage() {
                   <input
                     type="text"
                     placeholder={uploading ? "Uploading…" : "Type a message"}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
                     onKeyDown={handleKeyDown}
                     disabled={blocked}
                     className={`flex-1 px-4 py-3 rounded-full text-sm border focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/40 transition disabled:opacity-60 ${
@@ -1052,7 +1140,7 @@ export default function ChatPage() {
                   <button
                     type="submit"
                     aria-label="Send message"
-                    disabled={!input.trim() || blocked || uploading}
+                    disabled={!newMessage.trim() || blocked || uploading}
                     className="p-3 rounded-full bg-brand-500 text-white shadow-lg shadow-brand-500/30 hover:bg-brand-600 hover:shadow-brand-500/40 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
                   >
                     <Send size={20} />
@@ -1065,7 +1153,7 @@ export default function ChatPage() {
       </main>
 
       {/* View Contact modal */}
-      {showContact && selectedProfile && (
+      {showContact && selected && (
         <div
           className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4"
           onClick={() => setShowContact(false)}
@@ -1081,9 +1169,7 @@ export default function ChatPage() {
               <button
                 onClick={() => setShowContact(false)}
                 aria-label="Close contact info"
-                className={`p-1 rounded-full ${
-                  dark ? "hover:bg-white/10" : "hover:bg-black/5"
-                }`}
+                className={`p-1 rounded-full ${dark ? "hover:bg-white/10" : "hover:bg-black/5"}`}
               >
                 <X size={20} />
               </button>
@@ -1094,17 +1180,15 @@ export default function ChatPage() {
                   dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
                 }`}
               >
-                {selectedProfile.full_name?.charAt(0).toUpperCase() || "U"}
+                {selected.full_name?.charAt(0).toUpperCase() || "U"}
               </div>
               <div className="min-w-0">
-                <p className="font-semibold truncate">
-                  {selectedProfile.full_name || "Unknown User"}
-                </p>
+                <p className="font-semibold truncate">{selected.full_name || "Unknown User"}</p>
                 <p className={`text-sm truncate ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
-                  {selectedProfile.email}
+                  {selected.email}
                 </p>
-                <p className={`text-sm ${isOnline(selectedProfile.id) ? "text-brand-500" : ""}`}>
-                  {isOnline(selectedProfile.id) ? "online" : "offline"}
+                <p className={`text-sm ${isOnline(selected.id) ? "text-brand-500" : ""}`}>
+                  {isOnline(selected.id) ? "online" : "offline"}
                 </p>
               </div>
             </div>
@@ -1112,8 +1196,69 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* Wallpaper & bubble picker */}
+      {showWallpaper && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowWallpaper(false)}
+        >
+          <div
+            className={`w-full max-w-md rounded-2xl p-6 shadow-2xl ${
+              dark ? "bg-[#202C33] text-[#E9EDEF]" : "bg-white text-[#111B21]"
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Chat wallpaper</h3>
+              <button
+                onClick={() => setShowWallpaper(false)}
+                aria-label="Close wallpaper picker"
+                className={`p-1 rounded-full ${dark ? "hover:bg-white/10" : "hover:bg-black/5"}`}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="grid grid-cols-5 gap-3">
+              {wallpapers.map((w) => (
+                <button
+                  key={w.id}
+                  onClick={() => selectWallpaper(w.id)}
+                  title={w.id}
+                  aria-label={`Wallpaper ${w.id}`}
+                  className={`h-14 rounded-xl border-2 transition ${
+                    wallpaperId === w.id ? "border-brand-500" : "border-transparent"
+                  }`}
+                  style={{
+                    backgroundColor:
+                      w.id === "default" ? (dark ? "#0b141a" : "#ffffff") : w.bg,
+                    backgroundImage: w.pattern ? WA_DOODLE : undefined,
+                    backgroundSize: w.pattern ? "70px 70px" : undefined,
+                  }}
+                />
+              ))}
+            </div>
+
+            <h3 className="text-lg font-semibold mt-6 mb-3">Bubble color</h3>
+            <div className="grid grid-cols-4 gap-3">
+              {bubbleColors.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => selectBubble(c)}
+                  title={c}
+                  aria-label={`Bubble color ${c}`}
+                  className={`h-12 rounded-xl border-2 transition ${
+                    bubbleColor === c ? "border-brand-500" : "border-transparent"
+                  }`}
+                  style={{ backgroundColor: c }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Incoming call modal */}
-      {call && call.dir === "incoming" && call.status === "ringing" && (
+      {incomingCall && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4">
           <div
             className={`w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center ${
@@ -1125,10 +1270,12 @@ export default function ChatPage() {
                 dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
               }`}
             >
-              {call.with.full_name?.charAt(0).toUpperCase() || "?"}
+              {incomingCall.with.full_name?.charAt(0).toUpperCase() || "?"}
             </div>
-            <p className="mt-3 text-sm uppercase tracking-wide opacity-70">Incoming voice call</p>
-            <p className="text-xl font-semibold mt-1">{call.with.full_name}</p>
+            <p className="mt-3 text-sm uppercase tracking-wide opacity-70">
+              Incoming {incomingCall.type || "voice"} call
+            </p>
+            <p className="text-xl font-semibold mt-1">{incomingCall.with.full_name}</p>
             <div className="flex gap-3 mt-6">
               <button
                 onClick={rejectCall}
@@ -1147,24 +1294,32 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Ongoing / outgoing call bar */}
-      {call && !(call.dir === "incoming" && call.status === "ringing") && (
+      {/* Active / outgoing call bar */}
+      {activeCall && (
         <div
           className={`fixed top-4 right-4 z-[120] rounded-2xl border shadow-xl px-4 py-3 flex items-center gap-3 ${
-            dark ? "bg-[#202C33] border-[#3B4A54] text-[#E9EDEF]" : "bg-white border-[#E9EDEF] text-[#111B21]"
+            dark
+              ? "bg-[#202C33] border-[#3B4A54] text-[#E9EDEF]"
+              : "bg-white border-[#E9EDEF] text-[#111B21]"
           }`}
         >
           <div className="w-9 h-9 rounded-full bg-brand-500 text-white flex items-center justify-center font-semibold">
-            {call.with.full_name?.charAt(0).toUpperCase() || "?"}
+            {activeCall.with.full_name?.charAt(0).toUpperCase() || "?"}
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold truncate">{call.with.full_name}</p>
-            <p className={`text-xs ${call.status === "active" ? "text-brand-500" : dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
-              {call.status === "active"
+            <p className="text-sm font-semibold truncate">{activeCall.with.full_name}</p>
+            <p
+              className={`text-xs ${
+                activeCall.status === "active"
+                  ? "text-brand-500"
+                  : dark
+                    ? "text-[#8696A0]"
+                    : "text-[#667781]"
+              }`}
+            >
+              {activeCall.status === "active"
                 ? `Connected${micReady ? " · mic on" : " · mic off"}`
-                : call.dir === "outgoing"
-                  ? "Ringing…"
-                  : "Connected"}
+                : "Ringing…"}
             </p>
           </div>
           <button
@@ -1176,7 +1331,7 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Transient notice toast */}
+      {/* Transient notice */}
       {notice && (
         <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[130] bg-black/85 text-white text-sm px-4 py-2 rounded-full shadow-lg">
           {notice}

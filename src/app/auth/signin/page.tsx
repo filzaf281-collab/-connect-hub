@@ -14,44 +14,53 @@ export default function SignInPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     setError("");
 
-    // Always send the real password. (The old code sent an empty string
-    // whenever the "Show" toggle was off, causing "Invalid login credentials".)
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      // Always send the real password. (The old code sent an empty string
+      // whenever the "Show" toggle was off, causing "Invalid login credentials".)
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (signInError) {
-      setError(signInError.message);
+      if (signInError) {
+        console.log("Sign-in error:", signInError.message);
+        setError(signInError.message);
+        setLoading(false);
+        return;
+      }
+
+      // Make sure a profile row exists (fire-and-forget, non-blocking).
+      if (data.user) {
+        supabase
+          .from("profiles")
+          .upsert(
+            {
+              id: data.user.id,
+              email: data.user.email,
+              full_name: data.user.email?.split("@")[0] || "User",
+            },
+            { onConflict: "id" }
+          )
+          .then(
+            () => {},
+            () => {}
+          );
+      }
+
+      console.log("Signed in OK, redirecting to /chat");
+      router.push("/chat");
+      router.refresh();
+    } catch (err: any) {
+      console.log("Sign-in exception:", err?.message);
+      setError(err?.message || "Something went wrong. Please try again.");
       setLoading(false);
-      return;
     }
-
-    // Make sure a profile row exists (fire-and-forget, non-blocking).
-    if (data.user) {
-      supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: data.user.id,
-            email: data.user.email,
-            full_name: data.user.email?.split("@")[0] || "User",
-          },
-          { onConflict: "id" }
-        )
-        .then(
-          () => {},
-          () => {}
-        );
-    }
-
-    router.push("/chat");
-    router.refresh();
   };
 
   return (
@@ -69,7 +78,7 @@ export default function SignInPage() {
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        <form onSubmit={handleSignIn} className="space-y-4">
           <div>
             <label className="block mb-2 text-sm font-medium text-secondary">Email Address</label>
             <input
@@ -105,11 +114,26 @@ export default function SignInPage() {
           </div>
 
           <button
-            type="submit"
+            type="button"
+            onClick={handleSignIn}
             disabled={loading}
-            className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-[0.99] transition-all disabled:opacity-50 disabled:shadow-none"
+            className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-[0.99] transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
           >
-            {loading ? "Signing in..." : "Sign In"}
+            {loading ? (
+              <>
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
+                  aria-hidden="true"
+                />
+                Signing in...
+              </>
+            ) : (
+              "Sign In"
+            )}
+          </button>
+          {/* Hidden submit keeps Enter-to-submit working while the visible button is type="button" */}
+          <button type="submit" className="hidden" tabIndex={-1} aria-hidden="true">
+            Sign In
           </button>
         </form>
 

@@ -91,7 +91,7 @@ async function insertMessage(payload: Record<string, any>) {
   }
 
   for (let i = 0; i <= OPTIONAL_MSG_COLS.length; i++) {
-    const { data, error } = await supabase.from("messages").insert(p).select();
+    const { data, error } = await supabase.from("messages").insert(p).select().single();
     if (!error) {
       for (const c of OPTIONAL_MSG_COLS) if (c in p) colSupported[c] = true;
       return { data, error: null as any };
@@ -283,20 +283,56 @@ export default function ChatPage() {
     }
   };
 
-  // Load messages for a conversation
-  const loadMessages = async (convId: string) => {
+  // Load every message exchanged between the two users (pair OR filter, so
+  // full history loads regardless of conversation_id bookkeeping).
+  const loadMessages = async (myId: string, otherId: string) => {
     setIsLoading(true);
     try {
-      const { data } = await supabase
+      const pairFilter =
+        `and(sender_id.eq.${myId},receiver_id.eq.${otherId}),` +
+        `and(sender_id.eq.${otherId},receiver_id.eq.${myId})`;
+
+      // Safety net: rows written before receiver_id was populated only carry
+      // conversation_id — also include messages from conversations these two
+      // users share so older history still loads.
+      let convBranch = "";
+      try {
+        const { data: mine } = await supabase
+          .from("conversation_participants")
+          .select("conversation_id")
+          .eq("user_id", myId);
+        const myConvIds = (mine || []).map((p: any) => p.conversation_id);
+        if (myConvIds.length) {
+          const { data: shared } = await supabase
+            .from("conversation_participants")
+            .select("conversation_id")
+            .in("conversation_id", myConvIds)
+            .eq("user_id", otherId);
+          const sharedIds = (shared || []).map((p: any) => p.conversation_id);
+          if (sharedIds.length) {
+            convBranch = `,conversation_id.in.(${sharedIds.join(",")})`;
+          }
+        }
+      } catch {
+        /* pair filter alone still works */
+      }
+
+      const { data, error } = await supabase
         .from("messages")
         .select("*")
-        .eq("conversation_id", convId)
+        .or(`${pairFilter}${convBranch}`)
         .order("created_at", { ascending: true });
-      if (data) setMessages(data as Message[]);
-    } catch {
-      /* keep current messages */
+
+      if (error) {
+        console.log("Load messages error:", error.message);
+      } else if (data && selectedRef.current?.id === otherId) {
+        // Ignore stale responses if the user switched chats mid-flight
+        setMessages(data as Message[]);
+      }
+    } catch (err: any) {
+      console.log("Load messages error:", err?.message);
     }
-    setIsLoading(false);
+    if (selectedRef.current?.id === otherId) setIsLoading(false);
   };
 
   // When a chat is opened: reset state, resolve conversation, load messages
@@ -310,15 +346,16 @@ export default function ChatPage() {
 
     if (selected && user?.id) {
       setMessages([]);
+      const otherId = selected.id;
       (async () => {
-        const convId = await getOrCreateConversation(user.id, selected.id);
-        convIdRef.current = convId;
-        if (convId) {
-          await loadMessages(convId);
-        } else {
-          console.log("Could not open conversation");
-          setNotice("Could not open conversation");
-        }
+        // Resolve the conversation (needed to attach conversation_id on send)
+        // in parallel with loading history — history itself is pair-based.
+        const convP = getOrCreateConversation(user.id, otherId).then((id) => {
+          convIdRef.current = id;
+          if (!id) console.log("No shared conversation row yet; using pair ids");
+          return id;
+        });
+        await Promise.all([convP, loadMessages(user.id, otherId)]);
       })();
     } else {
       setMessages([]);
@@ -327,31 +364,38 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, user?.id]);
 
-  // Realtime: new messages for the currently open conversation (deduped)
+  // Realtime: subscribe to ALL message inserts (no server-side filter, which
+  // is unreliable across schema variations) and filter in JS by the
+  // (sender,receiver) pair of the currently open chat. Deduped by id.
   useEffect(() => {
-    if (!user?.id) return;
+    const myId = user?.id;
+    const otherId = selected?.id;
+    if (!myId || !otherId) return;
+
     const channel = supabase
-      .channel("chat-realtime")
+      .channel(`chat-${myId}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
         (payload: any) => {
           const m = payload.new as Message;
           if (!m?.id) return;
-          // Only append messages that belong to the open conversation
-          if (!convIdRef.current || m.conversation_id !== convIdRef.current) return;
+          const belongs =
+            (m.sender_id === myId && m.receiver_id === otherId) ||
+            (m.sender_id === otherId && m.receiver_id === myId);
+          if (!belongs) return;
+          // Guard against a stale channel firing after switching chats
+          if (selectedRef.current?.id !== otherId) return;
           setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
         }
       )
       .subscribe();
     chatChannelRef.current = channel;
     return () => {
-      if (chatChannelRef.current) {
-        supabase.removeChannel(chatChannelRef.current);
-        chatChannelRef.current = null;
-      }
+      supabase.removeChannel(channel);
+      if (chatChannelRef.current === channel) chatChannelRef.current = null;
     };
-  }, [user?.id]);
+  }, [user?.id, selected?.id]);
 
   // Realtime presence: who is online
   useEffect(() => {
@@ -538,7 +582,8 @@ export default function ChatPage() {
         return;
       }
 
-      const row = data?.[0] as Message | undefined;
+      // Optimistic append of the row returned by .select().single()
+      const row = data as Message | null;
       setNewMessage("");
       if (row) {
         setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
@@ -598,7 +643,7 @@ export default function ChatPage() {
         return;
       }
 
-      const row = data?.[0] as Message | undefined;
+      const row = data as Message | null;
       if (row) setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
     } catch (err: any) {
       console.log("Upload error:", err?.message);

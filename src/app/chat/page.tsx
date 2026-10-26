@@ -1,6 +1,6 @@
 "use client";
 
-import { supabase } from "../../lib/supabase";
+import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "../../lib/supabase";
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -20,7 +20,19 @@ import {
   CheckCheck,
   Check,
   X,
+  Mic,
+  MicOff,
+  Camera,
+  CameraOff,
+  PhoneOff,
+  Plus,
+  Users,
 } from "lucide-react";
+import AudioPlayer from "../../components/AudioPlayer";
+import StoriesBar, { StoryGroup } from "../../components/StoriesBar";
+import StoryViewer from "../../components/StoryViewer";
+import CreateGroupModal from "../../components/CreateGroupModal";
+import { useWebRTCCall } from "../../hooks/useWebRTCCall";
 
 interface Profile {
   id: string;
@@ -36,30 +48,40 @@ interface Message {
   sender_id: string;
   receiver_id?: string | null;
   content: string;
-  message_type?: string | null; // "text" | "image" | "file"
+  message_type?: string | null; // "text" | "image" | "file" | "audio"
+  file_url?: string | null;
+  file_type?: string | null; // MIME type for attachments
+  audio_url?: string | null;
   is_read?: boolean | null; // read receipt: true once the RECEIVER opened the chat
   read_at?: string | null;
   delivered_at?: string | null;
   created_at: string;
 }
 
-interface ActiveCall {
+interface GroupMessage {
   id: string;
-  with: Profile;
-  dir: "incoming" | "outgoing";
-  status: "ringing" | "active";
+  group_id: string;
+  sender_id: string;
+  content?: string | null;
+  file_url?: string | null;
+  file_type?: string | null;
+  audio_url?: string | null;
+  is_read?: boolean | null;
+  delivered_at?: string | null;
+  created_at: string;
 }
 
-interface IncomingCall {
+interface GroupMeta {
   id: string;
-  caller_id: string;
-  receiver_id: string;
-  type?: string;
-  status: string;
-  with: Profile;
+  name: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  created_by?: string | null;
+  created_at?: string;
+  member_count: number;
+  last_message?: string | null;
+  last_at?: string | null;
 }
-
-const ENDED_STATUSES = ["ended", "rejected", "missed", "declined", "failed", "cancelled"];
 
 // Wallpaper options (saved to localStorage, applied to the messages area)
 const wallpapers = [
@@ -83,7 +105,14 @@ const WA_DOODLE =
 // added later via SQL migrations). We try with them first and drop any column
 // the schema cache reports as missing, so BOTH schemas work.
 // ---------------------------------------------------------------------------
-const OPTIONAL_MSG_COLS = ["receiver_id", "message_type", "is_read"];
+const OPTIONAL_MSG_COLS = [
+  "receiver_id",
+  "message_type",
+  "is_read",
+  "file_url",
+  "file_type",
+  "audio_url",
+];
 const colSupported: Record<string, boolean> = {};
 // Flipped to false once we learn the read-receipt columns don't exist, so the
 // mark-as-read UPDATE isn't retried (and can't error) on every message.
@@ -132,19 +161,98 @@ function getTickStatus(msg: Message, myId?: string | null): "sent" | "delivered"
 }
 
 // ---------------------------------------------------------------------------
+// Resilient insert for group_messages (file_url / file_type / audio_url /
+// delivered_at only exist after SUPABASE_MEGA_UPGRADE.sql is run).
+// ---------------------------------------------------------------------------
+const OPTIONAL_GROUP_COLS = ["file_url", "file_type", "audio_url"];
+let groupColsSupported = true;
+
+async function insertGroupMessage(payload: Record<string, any>) {
+  const p: Record<string, any> = { ...payload };
+  if (!groupColsSupported) for (const c of OPTIONAL_GROUP_COLS) delete p[c];
+
+  for (let i = 0; i <= OPTIONAL_GROUP_COLS.length; i++) {
+    const { data, error } = await supabase.from("group_messages").insert(p).select().single();
+    if (!error) return { data, error: null as any };
+
+    const msg = `${error.message || ""} ${error.details || ""}`;
+    const flagged = OPTIONAL_GROUP_COLS.find((c) => c in p && msg.includes(c));
+    if (flagged) {
+      groupColsSupported = false;
+      delete p[flagged];
+      continue;
+    }
+    return { data, error };
+  }
+  return { data: null, error: { message: "Could not send group message" } };
+}
+
+// ---------------------------------------------------------------------------
+// Group tick status (same 3 states as 1-1, but "read" requires EVERY other
+// member to have a row in group_message_reads).
+// ---------------------------------------------------------------------------
+function groupTickStatus(
+  m: GroupMessage,
+  myId: string | null | undefined,
+  memberCount: number,
+  reads: { message_id: string; user_id: string }[]
+): "sent" | "delivered" | "read" | null {
+  if (!myId || m.sender_id !== myId) return null;
+  if (!m.delivered_at) return "sent";
+  const others = Math.max(1, memberCount - 1);
+  const readers = new Set(
+    reads.filter((r) => r.message_id === m.id && r.user_id !== myId).map((r) => r.user_id)
+  );
+  return readers.size >= others ? "read" : "delivered";
+}
+
+const SENDER_COLORS = [
+  "#e91e63",
+  "#9c27b0",
+  "#3f51b5",
+  "#009688",
+  "#ff5722",
+  "#795548",
+  "#607d8b",
+];
+function senderColor(id: string) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return SENDER_COLORS[h % SENDER_COLORS.length];
+}
+
+// ---------------------------------------------------------------------------
 // Classify a message when `message_type` isn't stored (column not added yet),
 // by inferring from the content. Text stays text; storage URLs become media.
+// Works for both `messages` and `group_messages` rows (structural typing).
 // ---------------------------------------------------------------------------
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i;
-const FILE_EXT =
-  /\.(pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar|gz|mp3|mp4|wav|mov|avi|mkv)$/i;
+const VIDEO_EXT = /\.(mp4|webm|mov|m4v|avi|mkv)$/i;
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|opus|weba|ogg)$/i;
+const FILE_EXT = /\.(pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar|gz)$/i;
 
-function classifyMessage(msg: Message): string {
-  if (msg.message_type) return msg.message_type;
+interface MsgLike {
+  sender_id: string;
+  content?: string | null;
+  message_type?: string | null;
+  file_url?: string | null;
+  file_type?: string | null;
+  audio_url?: string | null;
+}
+
+function classifyMessage(msg: MsgLike): "text" | "image" | "video" | "audio" | "file" {
+  if (msg.audio_url || msg.message_type === "audio") return "audio";
+  const ft = (msg.file_type || "").toLowerCase();
+  if (ft.startsWith("image") || msg.message_type === "image") return "image";
+  if (ft.startsWith("video")) return "video";
+  if ((msg.file_url || "").trim()) return "file";
+  if (msg.message_type === "file") return "file";
   const c = (msg.content || "").trim();
   if (!/^https?:\/\//i.test(c)) return "text";
   const path = c.split(/[?#]/)[0];
   if (IMAGE_EXT.test(path)) return "image";
+  if (VIDEO_EXT.test(path)) return "video";
+  if (AUDIO_EXT.test(path)) return "audio";
   if (FILE_EXT.test(path)) return "file";
   return "text";
 }
@@ -185,10 +293,28 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
-  // Calls
-  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
-  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
-  const [micReady, setMicReady] = useState(false);
+  // Sidebar tabs + groups
+  const [sidebarTab, setSidebarTab] = useState<"chats" | "groups">("chats");
+  const [groups, setGroups] = useState<GroupMeta[]>([]);
+  const [selectedGroup, setSelectedGroup] = useState<GroupMeta | null>(null);
+  const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
+  const [groupReads, setGroupReads] = useState<{ message_id: string; user_id: string }[]>([]);
+  const [groupMembers, setGroupMembers] = useState<Profile[]>([]);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+
+  // Typing + presence (table-backed)
+  const [typingMap, setTypingMap] = useState<Record<string, number>>({});
+  const [peerPresence, setPeerPresence] = useState<{
+    is_online?: boolean | null;
+    last_seen?: string | null;
+  } | null>(null);
+
+  // Stories
+  const [storyTarget, setStoryTarget] = useState<StoryGroup | null>(null);
+
+  // Voice recording
+  const [recording, setRecording] = useState(false);
+  const [recSeconds, setRecSeconds] = useState(0);
 
   // Refs (read inside long-lived realtime subscriptions)
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -196,23 +322,28 @@ export default function ChatPage() {
   const selectedRef = useRef<Profile | null>(null);
   const profilesRef = useRef<Profile[]>([]);
   const convIdRef = useRef<string | null>(null);
-  const activeCallRef = useRef<ActiveCall | null>(null);
-  const incomingCallRef = useRef<IncomingCall | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
   const chatChannelRef = useRef<any>(null);
   const presenceChannelRef = useRef<any>(null);
-  const callsChannelRef = useRef<any>(null);
+
+  // Group / typing / presence / voice refs
+  const selectedGroupRef = useRef<GroupMeta | null>(null);
+  const tablesChannelRef = useRef<any>(null);
+  const typingTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const typingStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingLastPushRef = useRef(0);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recStartRef = useRef(0);
+  const recCancelRef = useRef(false);
+  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const dark = theme === "dark";
 
-  const updateActiveCall = (v: ActiveCall | null) => {
-    activeCallRef.current = v;
-    setActiveCall(v);
-  };
-  const updateIncomingCall = (v: IncomingCall | null) => {
-    incomingCallRef.current = v;
-    setIncomingCall(v);
-  };
+  // WebRTC calling (audio + video), signaling over Supabase broadcast
+  const rtc = useWebRTCCall(user?.id, (id: string) => {
+    const p = profilesRef.current.find((x) => x.id === id);
+    const name = p?.full_name || "Unknown";
+    return { name, initial: (name || "U").charAt(0).toUpperCase() };
+  });
 
   // Mark mounted (avoids hydration mismatch for theme-dependent UI)
   useEffect(() => {
@@ -356,6 +487,116 @@ export default function ChatPage() {
     if (selectedRef.current?.id === otherId) setIsLoading(false);
   };
 
+  // Load a group conversation: members, history, per-user reads
+  const loadGroupConversation = async (gid: string) => {
+    setIsLoading(true);
+    try {
+      const { data: memRows } = await supabase
+        .from("group_members")
+        .select("user_id")
+        .eq("group_id", gid);
+      const ids = (memRows || []).map((r: any) => r.user_id);
+      let memberProfiles: Profile[] = [];
+      if (ids.length) {
+        const { data: ps } = await supabase.from("profiles").select("*").in("id", ids);
+        memberProfiles = (ps || []) as Profile[];
+      }
+
+      const { data: gms } = await supabase
+        .from("group_messages")
+        .select("*")
+        .eq("group_id", gid)
+        .order("created_at", { ascending: true })
+        .limit(300);
+
+      let reads: { message_id: string; user_id: string }[] = [];
+      try {
+        const mids = (gms || []).map((m: any) => m.id);
+        if (mids.length) {
+          const { data: rr } = await supabase
+            .from("group_message_reads")
+            .select("message_id, user_id")
+            .in("message_id", mids);
+          reads = (rr || []) as any;
+        }
+      } catch {
+        /* table may not exist until SQL runs */
+      }
+
+      if (selectedGroupRef.current?.id !== gid) return; // stale response
+      setGroupMembers(memberProfiles);
+      setGroupMessages((gms || []) as GroupMessage[]);
+      setGroupReads(reads);
+    } catch (err: any) {
+      console.log("Load group error:", err?.message);
+    }
+    if (selectedGroupRef.current?.id === gid) setIsLoading(false);
+  };
+
+  // Load the user's groups for the sidebar (with member count + last message)
+  const loadGroups = async (myId: string) => {
+    try {
+      const { data: gm } = await supabase
+        .from("group_members")
+        .select("group_id")
+        .eq("user_id", myId);
+      const gids = (gm || []).map((r: any) => r.group_id);
+      if (!gids.length) {
+        setGroups([]);
+        return;
+      }
+      const [{ data: gs }, { data: memRows }, { data: lms }] = await Promise.all([
+        supabase.from("groups").select("*").in("id", gids).order("created_at", { ascending: false }),
+        supabase.from("group_members").select("group_id").in("group_id", gids),
+        supabase
+          .from("group_messages")
+          .select("*")
+          .in("group_id", gids)
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ]);
+      const counts: Record<string, number> = {};
+      for (const r of memRows || []) counts[r.group_id] = (counts[r.group_id] || 0) + 1;
+      const lastMsg: Record<string, GroupMessage> = {};
+      for (const m of (lms || []) as GroupMessage[]) {
+        if (!lastMsg[m.group_id]) lastMsg[m.group_id] = m;
+      }
+      setGroups(
+        ((gs || []) as any[]).map((g) => ({
+          ...g,
+          member_count: counts[g.id] || 1,
+          last_message: lastMsg[g.id]?.content
+            ? String(lastMsg[g.id].content).slice(0, 60)
+            : lastMsg[g.id]
+              ? "Attachment"
+              : null,
+          last_at: lastMsg[g.id]?.created_at || null,
+        }))
+      );
+    } catch (err: any) {
+      console.log("Load groups error:", err?.message);
+    }
+  };
+
+  // When a GROUP chat is opened: reset state, load members + history + reads
+  useEffect(() => {
+    selectedGroupRef.current = selectedGroup;
+    setGroupMessages([]);
+    setGroupReads([]);
+    setGroupMembers([]);
+    if (selectedGroup && user?.id) {
+      loadGroupConversation(selectedGroup.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGroup, user?.id]);
+
+  // Load group list when the user is ready
+  useEffect(() => {
+    if (!user?.id) return;
+    loadGroups(user.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
   // When a chat is opened: reset state, resolve conversation, load messages
   useEffect(() => {
     selectedRef.current = selected;
@@ -397,7 +638,8 @@ export default function ChatPage() {
   useEffect(() => {
     const myId = user?.id;
     const otherId = selected?.id;
-    if (!myId || !otherId) return;
+    const gid = selectedGroup?.id;
+    if (!myId || (!otherId && !gid)) return;
 
     const claimDelivered = async (id: string) => {
       if (!readReceiptsSupported) return;
@@ -411,12 +653,25 @@ export default function ChatPage() {
       }
     };
 
+    const claimGroupDelivered = async (id: string) => {
+      const { error } = await supabase
+        .from("group_messages")
+        .update({ delivered_at: new Date().toISOString() })
+        .eq("id", id)
+        .is("delivered_at", null);
+      if (error) {
+        const msg = `${error.message || ""} ${error.details || ""}`;
+        if (/group_messages|delivered_at/i.test(msg)) groupColsSupported = false;
+      }
+    };
+
     const channel = supabase
-      .channel(`chat-${myId}-${otherId}-${Date.now()}`)
+      .channel(`chat-${myId}-${otherId || gid}-${Date.now()}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages" },
         async (payload: any) => {
+          if (!otherId) return;
           const m = payload.new as Message;
           if (!m?.id) return;
           const belongs =
@@ -434,6 +689,7 @@ export default function ChatPage() {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "messages" },
         (payload: any) => {
+          if (!otherId) return;
           const updated = payload.new as Message;
           if (!updated?.id) return;
           // Only updates to MY sent messages matter (delivered/read receipts)
@@ -446,13 +702,51 @@ export default function ChatPage() {
           );
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "group_messages" },
+        async (payload: any) => {
+          const m = payload.new as GroupMessage;
+          if (!m?.id || m.group_id !== gid) return;
+          if (selectedGroupRef.current?.id !== gid) return;
+          setGroupMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+          if (m.sender_id !== myId && !m.delivered_at) await claimGroupDelivered(m.id);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "group_messages" },
+        (payload: any) => {
+          const m = payload.new as GroupMessage;
+          if (!m?.id || m.sender_id !== myId) return;
+          if (selectedGroupRef.current?.id !== gid) return;
+          setGroupMessages((prev) =>
+            prev.some((x) => x.id === m.id)
+              ? prev.map((x) => (x.id === m.id ? { ...x, ...m } : x))
+              : prev
+          );
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "group_message_reads" },
+        (payload: any) => {
+          const r = payload.new as { message_id: string; user_id: string };
+          if (!r?.message_id || r.user_id === myId) return;
+          setGroupReads((prev) =>
+            prev.some((x) => x.message_id === r.message_id && x.user_id === r.user_id)
+              ? prev
+              : [...prev, r]
+          );
+        }
+      )
       .subscribe((status) => console.log("Realtime", status));
     chatChannelRef.current = channel;
     return () => {
       supabase.removeChannel(channel);
       if (chatChannelRef.current === channel) chatChannelRef.current = null;
     };
-  }, [user?.id, selected?.id]);
+  }, [user?.id, selected?.id, selectedGroup?.id]);
 
   // Mark messages as READ — but only when the receiver actually opens the chat
   // and views it (1s delay, so a mere flash of the tab doesn't count). Sending
@@ -460,9 +754,9 @@ export default function ChatPage() {
   useEffect(() => {
     const myId = user?.id;
     const otherId = selected?.id;
-    if (!myId || !otherId || !readReceiptsSupported) return;
+    const gid = selectedGroup?.id;
 
-    const markAsRead = async () => {
+    const markDmRead = async () => {
       // Only rows where I am the RECEIVER and the open chat's user is the SENDER
       const { error } = await supabase
         .from("messages")
@@ -500,11 +794,218 @@ export default function ChatPage() {
       });
     };
 
+    // Group path: upsert my per-message read rows + claim delivery for
+    // anything that arrived while I was offline.
+    const markGroupRead = async () => {
+      const incoming = groupMessages.filter((m) => m.sender_id !== myId);
+      if (!incoming.length) return;
+      const ts = new Date().toISOString();
+      const ids = incoming.map((m) => m.id);
+      try {
+        await supabase.from("group_message_reads").upsert(
+          ids.map((id) => ({ message_id: id, user_id: myId })),
+          { onConflict: "message_id,user_id", ignoreDuplicates: true }
+        );
+        await supabase
+          .from("group_messages")
+          .update({ delivered_at: ts })
+          .in("id", ids)
+          .is("delivered_at", null);
+      } catch (err: any) {
+        console.log("Group mark-read error:", err?.message);
+      }
+      if (selectedGroupRef.current?.id !== gid) return;
+      setGroupReads((prev) => {
+        const seen = new Set(prev.map((r) => `${r.message_id}:${r.user_id}`));
+        const add = ids
+          .map((id) => ({ message_id: id, user_id: myId }))
+          .filter((r) => !seen.has(`${r.message_id}:${r.user_id}`));
+        return add.length ? [...prev, ...add] : prev;
+      });
+      setGroupMessages((prev) => {
+        let changed = false;
+        const next = prev.map((m) => {
+          if (m.sender_id !== myId && !m.delivered_at) {
+            changed = true;
+            return { ...m, delivered_at: ts };
+          }
+          return m;
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    const run = () => {
+      if (otherId && readReceiptsSupported) markDmRead();
+      else if (gid) markGroupRead();
+    };
+
     // Re-arms when messages change, so new messages arriving while the chat is
     // open get marked read after the same 1.5s "user is viewing" delay.
-    const timer = setTimeout(markAsRead, 1500);
+    const timer = setTimeout(run, 1500);
     return () => clearTimeout(timer);
-  }, [selected, user?.id, messages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, selectedGroup, user?.id, messages, groupMessages]);
+
+  // Global table channel: typing indicators (INSERT/UPDATE/DELETE) + peer
+  // presence updates. Created ONCE per user (no server-side filter, JS
+  // filtered), so there's no topic-reuse race on chat switches.
+  useEffect(() => {
+    const myId = user?.id;
+    if (!myId) return;
+
+    const markTyping = (uid: string) => {
+      setTypingMap((prev) => ({ ...prev, [uid]: Date.now() }));
+      if (typingTimersRef.current[uid]) clearTimeout(typingTimersRef.current[uid]);
+      typingTimersRef.current[uid] = setTimeout(() => {
+        setTypingMap((prev) => {
+          if (!(uid in prev)) return prev;
+          const next = { ...prev };
+          delete next[uid];
+          return next;
+        });
+      }, 4000);
+    };
+
+    const applyTyping = (r: any) => {
+      if (!r?.sender_id || r.sender_id === myId || r.is_typing === false) return;
+      const dmMine = r.receiver_id === myId && selectedRef.current?.id === r.sender_id;
+      const grpMine = !!r.group_id && r.group_id === selectedGroupRef.current?.id;
+      if (dmMine || grpMine) markTyping(r.sender_id);
+    };
+
+    const channel = supabase
+      .channel(`tables-${myId}-${Date.now()}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "typing_indicators" },
+        ({ payload }: any) => applyTyping(payload.new)
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "typing_indicators" },
+        ({ payload }: any) => applyTyping(payload.new)
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "typing_indicators" },
+        ({ payload }: any) => {
+          const r = payload.old;
+          if (!r?.sender_id) return;
+          setTypingMap((prev) => {
+            if (!(r.sender_id in prev)) return prev;
+            const next = { ...prev };
+            delete next[r.sender_id];
+            return next;
+          });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "user_presence" },
+        ({ payload }: any) => {
+          const r = payload.new;
+          if (r?.user_id && r.user_id === selectedRef.current?.id) setPeerPresence(r);
+        }
+      )
+      .subscribe();
+    tablesChannelRef.current = channel;
+    return () => {
+      supabase.removeChannel(channel);
+      if (tablesChannelRef.current === channel) tablesChannelRef.current = null;
+      Object.values(typingTimersRef.current).forEach(clearTimeout);
+      typingTimersRef.current = {};
+    };
+  }, [user?.id]);
+
+  // user_presence: mark online on mount, heartbeat last_seen every 30s,
+  // go offline on unload (keepalive fetch survives page teardown).
+  useEffect(() => {
+    const myId = user?.id;
+    if (!myId) return;
+
+    const touch = async (online: boolean) => {
+      try {
+        await supabase.from("user_presence").upsert(
+          {
+            user_id: myId,
+            is_online: online,
+            last_seen: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        );
+      } catch {
+        /* table may not exist until SQL runs */
+      }
+    };
+
+    touch(true);
+    const iv = setInterval(() => touch(true), 30000);
+
+    const goOffline = () => {
+      (async () => {
+        try {
+          const { data } = await supabase.auth.getSession();
+          const tok = data?.session?.access_token;
+          if (!tok) return;
+          fetch(`${SUPABASE_URL}/rest/v1/user_presence?user_id=eq.${myId}`, {
+            method: "PATCH",
+            headers: {
+              apikey: SUPABASE_ANON_KEY,
+              Authorization: `Bearer ${tok}`,
+              "Content-Type": "application/json",
+              Prefer: "return=minimal",
+            },
+            body: JSON.stringify({
+              is_online: false,
+              last_seen: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }),
+            keepalive: true,
+          }).catch(() => undefined);
+        } catch {
+          /* ignore */
+        }
+      })();
+    };
+
+    const onVis = () => {
+      if (document.visibilityState === "hidden") goOffline();
+      else touch(true);
+    };
+    window.addEventListener("pagehide", goOffline);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(iv);
+      window.removeEventListener("pagehide", goOffline);
+      document.removeEventListener("visibilitychange", onVis);
+      touch(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  // Peer presence: fetch last_seen when a 1-1 chat opens
+  useEffect(() => {
+    const other = selected?.id;
+    if (!other) {
+      setPeerPresence(null);
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("user_presence")
+          .select("*")
+          .eq("user_id", other)
+          .maybeSingle();
+        if (selectedRef.current?.id === other) setPeerPresence((data as any) || null);
+      } catch {
+        /* table may not exist until SQL runs */
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
 
   // (Read receipts now arrive on the merged chat channel above.)
 
@@ -541,102 +1042,6 @@ export default function ChatPage() {
     };
   }, [user?.id]);
 
-  // Microphone helpers (voice calls)
-  const startMic = async () => {
-    if (localStreamRef.current) return;
-    try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("unsupported");
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStreamRef.current = stream;
-      setMicReady(true);
-    } catch (err: any) {
-      console.log("Microphone unavailable:", err?.message);
-      setMicReady(false);
-      setNotice("Microphone unavailable");
-    }
-  };
-
-  const stopMic = () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((t) => t.stop());
-      localStreamRef.current = null;
-    }
-    setMicReady(false);
-  };
-
-  // Realtime: calls (incoming ring + status updates both ways)
-  useEffect(() => {
-    if (!user?.id) return;
-    const myId = user.id;
-
-    const channel = supabase
-      .channel("calls")
-      // Someone is calling me
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "calls", filter: `receiver_id=eq.${myId}` },
-        (payload: any) => {
-          const c = payload.new;
-          if (!c?.id) return;
-          if (activeCallRef.current || incomingCallRef.current) return;
-          const caller =
-            profilesRef.current.find((p) => p.id === c.caller_id) || {
-              id: c.caller_id,
-              email: "",
-              full_name: "Incoming call",
-              avatar_url: null,
-            };
-          updateIncomingCall({ ...c, with: caller } as IncomingCall);
-        }
-      )
-      // My outgoing call changed status (accepted / ended / rejected)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "calls", filter: `caller_id=eq.${myId}` },
-        (payload: any) => {
-          const c = payload.new;
-          const cur = activeCallRef.current;
-          if (!c?.id || !cur || cur.id !== c.id) return;
-          if (c.status === "active") {
-            updateActiveCall({ ...cur, status: "active" });
-            startMic();
-          } else if (ENDED_STATUSES.includes(c.status)) {
-            stopMic();
-            updateActiveCall(null);
-          }
-        }
-      )
-      // A call I'm receiving ended (caller hung up / cancelled)
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "calls", filter: `receiver_id=eq.${myId}` },
-        (payload: any) => {
-          const c = payload.new;
-          if (!c?.id) return;
-          const cur = activeCallRef.current;
-          if (cur && cur.id === c.id && ENDED_STATUSES.includes(c.status)) {
-            stopMic();
-            updateActiveCall(null);
-          }
-          const inc = incomingCallRef.current;
-          if (inc && inc.id === c.id && ENDED_STATUSES.includes(c.status)) {
-            updateIncomingCall(null);
-          }
-        }
-      )
-      .subscribe();
-    callsChannelRef.current = channel;
-    return () => {
-      if (callsChannelRef.current) {
-        supabase.removeChannel(callsChannelRef.current);
-        callsChannelRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
   // Close the 3-dots menu / emoji picker on outside click
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -658,23 +1063,35 @@ export default function ChatPage() {
   // Keep scrolled to the newest message
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // Stop mic + channels on unmount
-  useEffect(() => {
-    return () => {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((t) => t.stop());
-        localStreamRef.current = null;
-      }
-    };
-  }, []);
+  }, [messages, groupMessages]);
 
   // --- Messaging ---
+  const sendGroupText = async (text: string) => {
+    const grp = selectedGroup;
+    if (!grp || !user?.id) return;
+    const { data, error } = await insertGroupMessage({
+      group_id: grp.id,
+      sender_id: user.id,
+      content: text,
+    });
+    if (error) {
+      setNotice(error.message || "Could not send group message");
+      return;
+    }
+    const row = data as GroupMessage | null;
+    setNewMessage("");
+    if (row) setGroupMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
+  };
+
   const handleSend = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const text = newMessage.trim();
-    if (!text || !user?.id || !selected) return;
+    if (!text || !user?.id) return;
+    if (selectedGroup) {
+      await sendGroupText(text);
+      return;
+    }
+    if (!selected) return;
 
     try {
       const payload: Record<string, any> = {
@@ -725,38 +1142,66 @@ export default function ChatPage() {
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
-    if (!file || !user?.id || !selected) return;
+    const myId = user?.id;
+    if (!file || !myId || (!selected && !selectedGroup)) return;
 
     setUploading(true);
     try {
       const fileName = `${Date.now()}_${file.name}`;
-      const { error } = await supabase.storage.from("chat-files").upload(fileName, file);
+      const { error } = await supabase.storage
+        .from("chat-files")
+        .upload(fileName, file, { contentType: file.type || undefined });
       if (error) {
         console.log("Upload error:", error.message);
-        alert(error.message);
+        setNotice(
+          error.message.includes("bucket")
+            ? "Run SUPABASE_MEGA_UPGRADE.sql to enable media sharing"
+            : error.message
+        );
         return;
       }
 
       const {
         data: { publicUrl },
       } = supabase.storage.from("chat-files").getPublicUrl(fileName);
+      const isImage = file.type.startsWith("image");
+
+      if (selectedGroup) {
+        const { data, error: insErr } = await insertGroupMessage({
+          group_id: selectedGroup.id,
+          sender_id: myId,
+          content: publicUrl,
+          file_url: publicUrl,
+          file_type: file.type || "application/octet-stream",
+        });
+        if (insErr) {
+          setNotice(insErr.message || "Could not send attachment");
+          return;
+        }
+        const row = data as GroupMessage | null;
+        if (row)
+          setGroupMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
+        return;
+      }
+      if (!selected) return;
 
       const payload: Record<string, any> = {
-        sender_id: user.id,
+        sender_id: myId,
         content: publicUrl,
         conversation_id: convIdRef.current,
         // Same receipt rules as text: never read/delivered on send.
         is_read: false,
+        receiver_id: selected.id,
+        message_type: isImage ? "image" : "file",
+        file_url: publicUrl,
+        file_type: file.type || "application/octet-stream",
       };
-      // Auto-dropped if the column doesn't exist yet.
-      if (selected.id) payload.receiver_id = selected.id;
-      payload.message_type = file.type.startsWith("image") ? "image" : "file";
 
       const { data, error: insErr } = await insertMessage(payload);
 
       if (insErr) {
         console.log("Attachment send error:", insErr.message);
-        alert(insErr.message);
+        setNotice(insErr.message);
         return;
       }
 
@@ -764,73 +1209,217 @@ export default function ChatPage() {
       if (row) setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
     } catch (err: any) {
       console.log("Upload error:", err?.message);
-      alert(err?.message || "Upload failed");
+      setNotice(err?.message || "Upload failed");
     } finally {
       setUploading(false);
     }
   };
 
-  // --- Calls ---
-  const startCall = async () => {
-    if (!user?.id || !selected || activeCall || incomingCall) return;
+  // --- Voice messages (hold the mic to record, release to send) ---
+  const startRecording = async () => {
+    if (recording || !user?.id || (!selected && !selectedGroup)) return;
     try {
-      const { data, error } = await supabase
-        .from("calls")
-        .insert({
-          caller_id: user.id,
-          receiver_id: selected.id,
-          type: "voice",
-          status: "ringing",
-        })
-        .select()
-        .single();
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw Object.assign(new Error("unsupported"), { name: "NotSupportedError" });
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      const chunks: BlobPart[] = [];
+      rec.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) chunks.push(ev.data);
+      };
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const elapsed = Date.now() - recStartRef.current;
+        setRecording(false);
+        setRecSeconds(0);
+        if (recCancelRef.current || elapsed < 900) {
+          recCancelRef.current = false;
+          return;
+        }
+        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+        sendVoiceMessage(blob);
+      };
+      rec.start();
+      recorderRef.current = rec;
+      recStartRef.current = Date.now();
+      recCancelRef.current = false;
+      setRecording(true);
+      setRecSeconds(0);
+      recTimerRef.current = setInterval(() => {
+        setRecSeconds(Math.floor((Date.now() - recStartRef.current) / 1000));
+      }, 500);
+    } catch (err: any) {
+      console.log("Recording error:", err?.message);
+      setNotice(
+        err?.name === "NotAllowedError" || err?.name === "SecurityError"
+          ? "Microphone blocked by the browser — allow mic access to send voice notes"
+          : "Voice recording is not supported in this browser"
+      );
+    }
+  };
 
-      if (error || !data) {
-        console.log("Call error:", error?.message);
-        alert(error?.message || "Unable to start call");
+  const stopRecording = (cancel = false) => {
+    if (!recorderRef.current || recorderRef.current.state === "inactive") return;
+    if (cancel) recCancelRef.current = true;
+    if (recTimerRef.current) {
+      clearInterval(recTimerRef.current);
+      recTimerRef.current = null;
+    }
+    try {
+      recorderRef.current.stop();
+    } catch {
+      /* ignore */
+    }
+    recorderRef.current = null;
+  };
+
+  const sendVoiceMessage = async (blob: Blob) => {
+    const myId = user?.id;
+    if (!myId) return;
+    setUploading(true);
+    try {
+      const ext = (blob.type.split("/")[1] || "webm").split(";")[0] || "webm";
+      const path = `voice_${Date.now()}.${ext}`;
+      const { error } = await supabase.storage
+        .from("chat-files")
+        .upload(path, blob, { contentType: blob.type || "audio/webm" });
+      if (error) {
+        setNotice(
+          error.message.includes("bucket")
+            ? "Run SUPABASE_MEGA_UPGRADE.sql to enable voice messages"
+            : error.message
+        );
         return;
       }
-      updateActiveCall({ id: data.id, with: selected, dir: "outgoing", status: "ringing" });
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("chat-files").getPublicUrl(path);
+
+      if (selectedGroup) {
+        const { data, error: insErr } = await insertGroupMessage({
+          group_id: selectedGroup.id,
+          sender_id: myId,
+          content: publicUrl,
+          file_url: publicUrl,
+          file_type: blob.type || "audio/webm",
+          audio_url: publicUrl,
+        });
+        if (insErr) {
+          setNotice(insErr.message || "Could not send voice message");
+          return;
+        }
+        const row = data as GroupMessage | null;
+        if (row)
+          setGroupMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
+        return;
+      }
+      if (!selected) return;
+
+      const payload: Record<string, any> = {
+        sender_id: myId,
+        content: publicUrl,
+        conversation_id: convIdRef.current,
+        is_read: false,
+        receiver_id: selected.id,
+        message_type: "audio",
+        file_url: publicUrl,
+        file_type: blob.type || "audio/webm",
+        audio_url: publicUrl,
+      };
+      const { data, error: insErr } = await insertMessage(payload);
+      if (insErr) {
+        setNotice(insErr.message || "Could not send voice message");
+        return;
+      }
+      const row = data as Message | null;
+      if (row) setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
     } catch (err: any) {
-      console.log("Call error:", err?.message);
-      alert(err?.message || "Unable to start call");
+      console.log("Voice message error:", err?.message);
+      setNotice(err?.message || "Voice message failed");
+    } finally {
+      setUploading(false);
     }
   };
 
-  const acceptCall = async () => {
-    const c = incomingCallRef.current;
-    if (!c) return;
-    try {
-      await supabase.from("calls").update({ status: "active" }).eq("id", c.id);
-    } catch {
-      /* still show as active locally */
-    }
-    updateActiveCall({ id: c.id, with: c.with, dir: "incoming", status: "active" });
-    updateIncomingCall(null);
-    startMic();
+  // --- Typing indicator push (throttled while composing, delete 2s after idle) ---
+  const resetTypingStop = () => {
+    const myId = user?.id;
+    if (!myId) return;
+    if (typingStopRef.current) clearTimeout(typingStopRef.current);
+    typingStopRef.current = setTimeout(() => {
+      (async () => {
+        try {
+          if (selectedGroupRef.current) {
+            await supabase
+              .from("typing_indicators")
+              .delete()
+              .eq("sender_id", myId)
+              .eq("group_id", selectedGroupRef.current.id);
+          } else if (selectedRef.current) {
+            await supabase
+              .from("typing_indicators")
+              .delete()
+              .eq("sender_id", myId)
+              .eq("receiver_id", selectedRef.current.id);
+          }
+        } catch {
+          /* typing is best-effort */
+        }
+      })();
+    }, 2000);
   };
 
-  const rejectCall = async () => {
-    const c = incomingCallRef.current;
-    if (!c) return;
-    try {
-      await supabase.from("calls").update({ status: "rejected" }).eq("id", c.id);
-    } catch {
-      /* ignore */
+  const pushTyping = () => {
+    const myId = user?.id;
+    if (!myId) return;
+    const now = Date.now();
+    if (now - typingLastPushRef.current < 1500) {
+      resetTypingStop();
+      return;
     }
-    updateIncomingCall(null);
+    typingLastPushRef.current = now;
+    (async () => {
+      try {
+        const grp = selectedGroupRef.current;
+        if (grp) {
+          const { data } = await supabase
+            .from("typing_indicators")
+            .update({ is_typing: true, updated_at: new Date().toISOString() })
+            .eq("sender_id", myId)
+            .eq("group_id", grp.id)
+            .select("id");
+          if (!data || data.length === 0) {
+            await supabase
+              .from("typing_indicators")
+              .insert({ sender_id: myId, group_id: grp.id, is_typing: true });
+          }
+        } else if (selectedRef.current) {
+          const otherId = selectedRef.current.id;
+          const { data } = await supabase
+            .from("typing_indicators")
+            .update({ is_typing: true, updated_at: new Date().toISOString() })
+            .eq("sender_id", myId)
+            .eq("receiver_id", otherId)
+            .is("group_id", null)
+            .select("id");
+          if (!data || data.length === 0) {
+            await supabase
+              .from("typing_indicators")
+              .insert({ sender_id: myId, receiver_id: otherId, is_typing: true });
+          }
+        }
+      } catch {
+        /* typing is best-effort */
+      }
+    })();
+    resetTypingStop();
   };
 
-  const endCall = async () => {
-    const c = activeCallRef.current;
-    if (!c) return;
-    try {
-      await supabase.from("calls").update({ status: "ended" }).eq("id", c.id);
-    } catch {
-      /* ignore */
-    }
-    stopMic();
-    updateActiveCall(null);
+  // --- Calls (WebRTC audio/video via the useWebRTCCall hook) ---
+  const startRtcCall = (kind: "audio" | "video") => {
+    if (!user?.id || !selected || rtc.call || rtc.incoming) return;
+    rtc.startCall({ id: selected.id, full_name: selected.full_name }, kind);
   };
 
   // --- 3-dots menu actions ---
@@ -907,6 +1496,64 @@ export default function ChatPage() {
     backgroundRepeat: activeWallpaper.pattern ? "repeat" : undefined,
   };
 
+  // --- Derived: typing display, group counts, unified message view items ---
+  const dmTyping = selected
+    ? !!typingMap[selected.id] && Date.now() - typingMap[selected.id] < 5000
+    : false;
+  const groupTypingNames = selectedGroup
+    ? groupMembers
+        .filter(
+          (m) => m.id !== user?.id && typingMap[m.id] && Date.now() - typingMap[m.id] < 5000
+        )
+        .map((m) => (m.full_name || "Someone").split(" ")[0])
+    : [];
+  const groupMemberCount = groupMembers.length || selectedGroup?.member_count || 1;
+
+  const viewItems = selected
+    ? messages.map((m) => {
+        const kind = classifyMessage(m);
+        return {
+          id: m.id,
+          isMine: m.sender_id === user?.id,
+          senderName: null as string | null,
+          senderId: m.sender_id,
+          kind,
+          url: kind === "text" ? "" : m.file_url || m.audio_url || m.content,
+          text: m.content,
+          tick: getTickStatus(m, user?.id),
+          created_at: m.created_at,
+        };
+      })
+    : selectedGroup
+      ? groupMessages.map((m) => {
+          const kind = classifyMessage(m);
+          const mine = m.sender_id === user?.id;
+          return {
+            id: m.id,
+            isMine: mine,
+            senderName: mine
+              ? null
+              : groupMembers.find((p) => p.id === m.sender_id)?.full_name || "Unknown",
+            senderId: m.sender_id,
+            kind,
+            url: kind === "text" ? "" : m.file_url || m.audio_url || m.content || "",
+            text: m.content || "",
+            tick: groupTickStatus(m, user?.id, groupMemberCount, groupReads),
+            created_at: m.created_at,
+          };
+        })
+      : [];
+
+  const callStatusText = rtc.call
+    ? rtc.call.status === "active"
+      ? "Connected"
+      : rtc.call.status === "connecting"
+        ? "Connecting…"
+        : rtc.call.dir === "outgoing"
+          ? "Ringing…"
+          : "Ringing…"
+    : "";
+
   // Prevent hydration mismatch
   if (!mounted) {
     return (
@@ -923,7 +1570,7 @@ export default function ChatPage() {
       {/* Left sidebar */}
       <aside
         className={`${
-          selected ? "hidden md:flex" : "flex"
+          selected || selectedGroup ? "hidden md:flex" : "flex"
         } flex-col w-full md:w-[380px] h-screen border-r shadow-lg z-10 ${
           dark ? "bg-[#111B21] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
         }`}
@@ -978,6 +1625,40 @@ export default function ChatPage() {
           </div>
         </div>
 
+        {/* Stories bar (24h status) */}
+        {user?.id && (
+          <StoriesBar
+            meId={user.id}
+            meName={user?.email?.split("@")[0] || "Me"}
+            profiles={profiles}
+            onOpenGroup={setStoryTarget}
+            onNotice={setNotice}
+          />
+        )}
+
+        {/* Chats | Groups tabs */}
+        <div className={`flex border-b ${dark ? "border-[#2A3942]" : "border-[#E9EDEF]"}`}>
+          {(["chats", "groups"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => {
+                setSidebarTab(t);
+                if (t === "groups" && user?.id) loadGroups(user.id);
+              }}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                sidebarTab === t
+                  ? "text-brand-500 border-b-2 border-brand-500"
+                  : dark
+                    ? "text-[#8696A0] hover:text-[#E9EDEF]"
+                    : "text-[#667781] hover:text-[#111B21]"
+              }`}
+            >
+              {t === "chats" ? "Chats" : "Groups"}
+            </button>
+          ))}
+        </div>
+
+        {sidebarTab === "chats" && (
         <div
           className={`p-3 border-b ${
             dark ? "bg-[#111B21] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
@@ -1003,56 +1684,146 @@ export default function ChatPage() {
             />
           </div>
         </div>
+        )}
 
         <div className="flex-1 overflow-y-auto py-2">
-          {filteredProfiles.length === 0 ? (
-            <div
-              className={`text-center py-12 px-4 ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}
-            >
-              <p className="text-lg font-medium mb-2">Tap to start chatting</p>
-              <p className="text-sm">No users found</p>
-            </div>
-          ) : (
-            filteredProfiles.map((profile) => (
+          {sidebarTab === "chats" ? (
+            filteredProfiles.length === 0 ? (
               <div
-                key={profile.id}
-                onClick={() => setSelected(profile)}
-                className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-2xl cursor-pointer transition-all duration-200 ${
-                  selected?.id === profile.id
-                    ? dark
-                      ? "bg-[#2A3942] shadow-md shadow-black/25"
-                      : "bg-[#F0F2F5] shadow-md shadow-black/5"
-                    : dark
-                      ? "hover:bg-[#202C33] hover:shadow-sm hover:shadow-black/25"
-                      : "hover:bg-[#F5F6F6] hover:shadow-sm hover:shadow-black/5"
+                className={`text-center py-12 px-4 ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}
+              >
+                <p className="text-lg font-medium mb-2">Tap to start chatting</p>
+                <p className="text-sm">No users found</p>
+              </div>
+            ) : (
+              filteredProfiles.map((profile) => (
+                <div
+                  key={profile.id}
+                  onClick={() => {
+                    setSelectedGroup(null);
+                    setSelected(profile);
+                  }}
+                  className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-2xl cursor-pointer transition-all duration-200 ${
+                    selected?.id === profile.id
+                      ? dark
+                        ? "bg-[#2A3942] shadow-md shadow-black/25"
+                        : "bg-[#F0F2F5] shadow-md shadow-black/5"
+                      : dark
+                        ? "hover:bg-[#202C33] hover:shadow-sm hover:shadow-black/25"
+                        : "hover:bg-[#F5F6F6] hover:shadow-sm hover:shadow-black/5"
+                  }`}
+                >
+                  <div className="relative">
+                    <div
+                      className={`w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-semibold ring-2 ring-brand-500/20 ${
+                        dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
+                      }`}
+                    >
+                      {profile.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={profile.avatar_url}
+                          alt=""
+                          className="w-full h-full rounded-full object-cover"
+                        />
+                      ) : (
+                        profile.full_name?.charAt(0).toUpperCase() || "U"
+                      )}
+                    </div>
+                    {isOnline(profile.id) && (
+                      <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white dark:border-[#111B21] shadow-[0_0_8px_#10B981]"></span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className={`font-semibold truncate ${
+                        dark ? "text-[#E9EDEF]" : "text-[#111B21]"
+                      }`}
+                    >
+                      {profile.full_name || "Unknown User"}
+                    </p>
+                    <p className={`text-sm truncate ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
+                      {isOnline(profile.id) ? "online" : "Tap to start chatting"}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )
+          ) : (
+            <>
+              {/* New group button */}
+              <button
+                onClick={() => setShowCreateGroup(true)}
+                className={`w-full flex items-center gap-3 p-3 mx-2 my-1 rounded-2xl cursor-pointer transition-all duration-200 ${
+                  dark
+                    ? "bg-brand-500/10 hover:bg-brand-500/20 text-brand-400"
+                    : "bg-brand-500/10 hover:bg-brand-500/20 text-brand-700"
                 }`}
               >
-                <div className="relative">
+                <span className="w-[50px] h-[50px] rounded-full bg-brand-500 text-white flex items-center justify-center shrink-0">
+                  <Plus size={26} />
+                </span>
+                <span className="font-semibold">New group</span>
+              </button>
+
+              {groups.length === 0 ? (
+                <div
+                  className={`text-center py-12 px-4 ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}
+                >
+                  <p className="text-lg font-medium mb-2">No groups yet</p>
+                  <p className="text-sm">Tap “New group” to create one</p>
+                </div>
+              ) : (
+                groups.map((g) => (
                   <div
-                    className={`w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-semibold ring-2 ring-brand-500/20 ${
-                      dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
+                    key={g.id}
+                    onClick={() => {
+                      setSelected(null);
+                      setSelectedGroup(g);
+                    }}
+                    className={`flex items-center gap-3 p-3 mx-2 my-1 rounded-2xl cursor-pointer transition-all duration-200 ${
+                      selectedGroup?.id === g.id
+                        ? dark
+                          ? "bg-[#2A3942] shadow-md shadow-black/25"
+                          : "bg-[#F0F2F5] shadow-md shadow-black/5"
+                        : dark
+                          ? "hover:bg-[#202C33] hover:shadow-sm hover:shadow-black/25"
+                          : "hover:bg-[#F5F6F6] hover:shadow-sm hover:shadow-black/5"
                     }`}
                   >
-                    {profile.full_name?.charAt(0).toUpperCase() || "U"}
+                    <div
+                      className={`w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-semibold ring-2 ring-brand-500/20 shrink-0 overflow-hidden ${
+                        dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
+                      }`}
+                    >
+                      {g.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={g.avatar_url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Users size={22} />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p
+                        className={`font-semibold truncate ${
+                          dark ? "text-[#E9EDEF]" : "text-[#111B21]"
+                        }`}
+                      >
+                        {g.name}
+                      </p>
+                      <p className={`text-sm truncate ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
+                        {g.last_message ? `${g.last_message} · ` : ""}
+                        {g.member_count} member{g.member_count === 1 ? "" : "s"}
+                      </p>
+                    </div>
                   </div>
-                  {isOnline(profile.id) && (
-                    <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white dark:border-[#111B21] shadow-[0_0_8px_#10B981]"></span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p
-                    className={`font-semibold truncate ${
-                      dark ? "text-[#E9EDEF]" : "text-[#111B21]"
-                    }`}
-                  >
-                    {profile.full_name || "Unknown User"}
-                  </p>
-                  <p className={`text-sm truncate ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
-                    {isOnline(profile.id) ? "online" : "Tap to start chatting"}
-                  </p>
-                </div>
-              </div>
-            ))
+                ))
+              )}
+            </>
           )}
         </div>
       </aside>
@@ -1060,10 +1831,10 @@ export default function ChatPage() {
       {/* Right main area */}
       <main
         className={`${
-          selected ? "flex" : "hidden md:flex"
+          selected || selectedGroup ? "flex" : "hidden md:flex"
         } flex-1 flex-col min-w-0 ${dark ? "bg-[#0B141A]" : "bg-[#EFEAE2]"}`}
       >
-        {!selected ? (
+        {!selected && !selectedGroup ? (
           <div
             className={`flex-1 flex flex-col items-center justify-center text-center px-6 animate-slide-up ${
               dark ? "wa-doodle-dark text-[#8696A0]" : "wa-doodle-light text-[#667781]"
@@ -1088,7 +1859,10 @@ export default function ChatPage() {
             >
               <div className="flex items-center gap-3 min-w-0">
                 <button
-                  onClick={() => setSelected(null)}
+                  onClick={() => {
+                    setSelected(null);
+                    setSelectedGroup(null);
+                  }}
                   aria-label="Back to chats"
                   className={`md:hidden p-2 rounded-full transition-colors ${
                     dark
@@ -1099,11 +1873,24 @@ export default function ChatPage() {
                   <ArrowLeft size={24} />
                 </button>
                 <div
-                  className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-semibold ring-2 ring-brand-500/30 ${
+                  className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-semibold ring-2 ring-brand-500/30 overflow-hidden ${
                     dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
                   }`}
                 >
-                  {selected.full_name?.charAt(0).toUpperCase() || "U"}
+                  {selectedGroup ? (
+                    selectedGroup.avatar_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={selectedGroup.avatar_url}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Users size={20} />
+                    )
+                  ) : (
+                    selected?.full_name?.charAt(0).toUpperCase() || "U"
+                  )}
                 </div>
                 <div className="min-w-0">
                   <p
@@ -1111,48 +1898,66 @@ export default function ChatPage() {
                       dark ? "text-[#E9EDEF]" : "text-[#111B21]"
                     }`}
                   >
-                    {selected.full_name || "Unknown User"}
-                    {blocked && (
+                    {selectedGroup ? selectedGroup.name : selected?.full_name || "Unknown User"}
+                    {!selectedGroup && blocked && (
                       <span className="ml-2 text-xs font-normal text-red-500">(blocked)</span>
                     )}
                   </p>
                   <p
-                    className={`text-sm ${
-                      isOnline(selected.id)
+                    className={`text-sm truncate ${
+                      dmTyping || groupTypingNames.length
                         ? "text-brand-500 font-medium"
-                        : dark
-                          ? "text-[#8696A0]"
-                          : "text-[#667781]"
+                        : !selectedGroup && (isOnline(selected?.id || "") || peerPresence?.is_online)
+                          ? "text-brand-500 font-medium"
+                          : dark
+                            ? "text-[#8696A0]"
+                            : "text-[#667781]"
                     }`}
                   >
-                    {isOnline(selected.id) ? "online" : "offline"}
+                    {selectedGroup
+                      ? `${groupTypingNames.length
+                          ? `${groupTypingNames.slice(0, 2).join(", ")}${
+                              groupTypingNames.length > 2 ? " and others" : ""
+                            } is typing…`
+                          : `${groupMemberCount} member${groupMemberCount === 1 ? "" : "s"}`}`
+                      : dmTyping
+                        ? "typing…"
+                        : isOnline(selected?.id || "") || peerPresence?.is_online
+                          ? "online"
+                          : peerPresence?.last_seen
+                            ? `Last seen ${new Date(peerPresence.last_seen).toLocaleString()}`
+                            : "offline"}
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
-                <button
-                  onClick={startCall}
-                  aria-label="Voice call"
-                  className={`p-2 rounded-full transition-colors ${
-                    dark
-                      ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
-                  }`}
-                >
-                  <Phone size={20} />
-                </button>
-                <button
-                  onClick={startCall}
-                  aria-label="Video call"
-                  className={`p-2 rounded-full transition-colors ${
-                    dark
-                      ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
-                  }`}
-                >
-                  <Video size={20} />
-                </button>
+                {!selectedGroup && (
+                  <>
+                    <button
+                      onClick={() => startRtcCall("audio")}
+                      aria-label="Voice call"
+                      className={`p-2 rounded-full transition-colors ${
+                        dark
+                          ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
+                          : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+                      }`}
+                    >
+                      <Phone size={20} />
+                    </button>
+                    <button
+                      onClick={() => startRtcCall("video")}
+                      aria-label="Video call"
+                      className={`p-2 rounded-full transition-colors ${
+                        dark
+                          ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
+                          : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+                      }`}
+                    >
+                      <Video size={20} />
+                    </button>
+                  </>
+                )}
 
                 {/* 3-dots menu (closes on outside click) */}
                 <div ref={menuRef} className="relative">
@@ -1213,15 +2018,16 @@ export default function ChatPage() {
                 <div className="text-center py-8 text-[#667781] dark:text-[#8696A0]">
                   Loading messages...
                 </div>
-              ) : messages.length === 0 ? (
+              ) : viewItems.length === 0 ? (
                 <div className="text-center py-8 text-[#667781] dark:text-[#8696A0]">
-                  No messages yet. Start the conversation!
+                  {selectedGroup
+                    ? "No messages yet. Say hi to the group!"
+                    : "No messages yet. Start the conversation!"}
                 </div>
               ) : (
-                messages.map((msg) => {
-                  const isMine = msg.sender_id === user?.id;
-                  const kind = classifyMessage(msg);
-                  const tick = getTickStatus(msg, user?.id);
+                viewItems.map((item) => {
+                  const isMine = item.isMine;
+                  const tick = item.tick;
                   const bubbleStyle: React.CSSProperties = isMine
                     ? { backgroundColor: bubbleColor, color: "#111B21" }
                     : dark
@@ -1229,7 +2035,7 @@ export default function ChatPage() {
                       : { backgroundColor: "#ffffff", color: "#111B21" };
                   return (
                     <div
-                      key={msg.id}
+                      key={item.id}
                       className={`flex ${isMine ? "justify-end" : "justify-start"}`}
                     >
                       <div
@@ -1238,30 +2044,48 @@ export default function ChatPage() {
                         }`}
                         style={bubbleStyle}
                       >
-                        {kind === "image" ? (
+                        {item.senderName && (
+                          <p
+                            className="text-xs font-bold mb-1"
+                            style={{ color: senderColor(item.senderId) }}
+                          >
+                            {item.senderName}
+                          </p>
+                        )}
+                        {item.kind === "image" ? (
                           <img
-                            src={msg.content}
+                            src={item.url}
                             alt="attachment"
                             loading="lazy"
                             className="rounded-lg max-w-[240px] max-h-[260px] object-cover"
                           />
-                        ) : kind === "file" ? (
+                        ) : item.kind === "video" ? (
+                          <video
+                            src={item.url}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            className="rounded-lg max-w-[260px] max-h-[280px] bg-black"
+                          />
+                        ) : item.kind === "audio" ? (
+                          <AudioPlayer src={item.url} mine={isMine} />
+                        ) : item.kind === "file" ? (
                           <a
-                            href={msg.content}
+                            href={item.url}
                             target="_blank"
                             rel="noreferrer"
                             className="underline break-all"
                           >
-                            {fileNameFromUrl(msg.content)}
+                            {fileNameFromUrl(item.url)}
                           </a>
                         ) : (
-                          <p className="break-words whitespace-pre-wrap">{msg.content}</p>
+                          <p className="break-words whitespace-pre-wrap">{item.text}</p>
                         )}
                         <div
                           className="flex items-center justify-end gap-1 text-[11px] mt-1 opacity-70"
                           style={{ color: isMine ? "#111B21" : undefined }}
                         >
-                          {formatTime(msg.created_at)}
+                          {formatTime(item.created_at)}
                           {/* Ticks: single grey = sent, double grey = delivered, double BLUE = read */}
                           {tick === "sent" && <Check size={14} style={{ color: "#667781" }} />}
                           {tick === "delivered" && (
@@ -1340,29 +2164,68 @@ export default function ChatPage() {
                   tabIndex={-1}
                 />
 
-                <form onSubmit={handleSend} className="flex-1 flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder={uploading ? "Uploading…" : "Type a message"}
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    disabled={blocked}
-                    className={`flex-1 px-4 py-3 rounded-full text-sm border focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/40 transition disabled:opacity-60 ${
-                      dark
-                        ? "bg-[#2A3942] border-[#3B4A54] text-[#E9EDEF] placeholder-[#8696A0] hover:border-[#4A5A66]"
-                        : "bg-white border-[#E9EDEF] text-[#111B21] placeholder-[#667781] hover:border-[#D1D7DB]"
-                    }`}
-                  />
-                  <button
-                    type="submit"
-                    aria-label="Send message"
-                    disabled={!newMessage.trim() || blocked || uploading}
-                    className="p-3 rounded-full bg-brand-500 text-white shadow-lg shadow-brand-500/30 hover:bg-brand-600 hover:shadow-brand-500/40 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
-                  >
-                    <Send size={20} />
-                  </button>
-                </form>
+                {/* Voice message — hold to record, release to send, slide off to cancel */}
+                <button
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    startRecording();
+                  }}
+                  onPointerUp={() => stopRecording(false)}
+                  onPointerLeave={() => {
+                    if (recorderRef.current) stopRecording(true);
+                  }}
+                  onPointerCancel={() => stopRecording(true)}
+                  onContextMenu={(e) => e.preventDefault()}
+                  aria-label="Hold to record a voice message"
+                  disabled={uploading || blocked}
+                  style={{ touchAction: "none" }}
+                  className={`p-2 rounded-full transition-colors disabled:opacity-50 ${
+                    recording
+                      ? "text-red-500 animate-pulse bg-red-500/10"
+                      : dark
+                        ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+                  }`}
+                >
+                  <Mic size={24} />
+                </button>
+
+                {recording ? (
+                  <div className="flex-1 flex items-center gap-2 px-4 py-3 rounded-full bg-red-500/10 text-red-500 text-sm font-medium select-none">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                    <span className="truncate">
+                      Recording {Math.floor(recSeconds / 60)}:
+                      {(recSeconds % 60).toString().padStart(2, "0")} — release to send
+                    </span>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSend} className="flex-1 flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder={uploading ? "Uploading…" : "Type a message"}
+                      value={newMessage}
+                      onChange={(e) => {
+                        setNewMessage(e.target.value);
+                        if (e.target.value.trim()) pushTyping();
+                      }}
+                      onKeyDown={handleKeyDown}
+                      disabled={blocked}
+                      className={`flex-1 px-4 py-3 rounded-full text-sm border focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/40 transition disabled:opacity-60 ${
+                        dark
+                          ? "bg-[#2A3942] border-[#3B4A54] text-[#E9EDEF] placeholder-[#8696A0] hover:border-[#4A5A66]"
+                          : "bg-white border-[#E9EDEF] text-[#111B21] placeholder-[#667781] hover:border-[#D1D7DB]"
+                      }`}
+                    />
+                    <button
+                      type="submit"
+                      aria-label="Send message"
+                      disabled={!newMessage.trim() || blocked || uploading}
+                      className="p-3 rounded-full bg-brand-500 text-white shadow-lg shadow-brand-500/30 hover:bg-brand-600 hover:shadow-brand-500/40 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none"
+                    >
+                      <Send size={20} />
+                    </button>
+                  </form>
+                )}
               </div>
             </div>
           </>
@@ -1475,8 +2338,8 @@ export default function ChatPage() {
       )}
 
       {/* Incoming call modal */}
-      {incomingCall && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4">
+      {rtc.incoming && (
+        <div className="fixed inset-0 z-[145] flex items-center justify-center bg-black/70 p-4">
           <div
             className={`w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center ${
               dark ? "bg-[#202C33] text-[#E9EDEF]" : "bg-white text-[#111B21]"
@@ -1487,21 +2350,21 @@ export default function ChatPage() {
                 dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
               }`}
             >
-              {incomingCall.with.full_name?.charAt(0).toUpperCase() || "?"}
+              {rtc.incoming.fromInitial || "?"}
             </div>
             <p className="mt-3 text-sm uppercase tracking-wide opacity-70">
-              Incoming {incomingCall.type || "voice"} call
+              Incoming {rtc.incoming.kind} call
             </p>
-            <p className="text-xl font-semibold mt-1">{incomingCall.with.full_name}</p>
+            <p className="text-xl font-semibold mt-1">{rtc.incoming.fromName}</p>
             <div className="flex gap-3 mt-6">
               <button
-                onClick={rejectCall}
+                onClick={rtc.rejectCall}
                 className="flex-1 py-3 rounded-xl font-medium bg-red-500 text-white hover:bg-red-600 transition-colors"
               >
                 Reject
               </button>
               <button
-                onClick={acceptCall}
+                onClick={rtc.acceptCall}
                 className="flex-1 py-3 rounded-xl font-medium bg-brand-500 text-white hover:bg-brand-600 transition-colors"
               >
                 Accept
@@ -1511,41 +2374,132 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* Active / outgoing call bar */}
-      {activeCall && (
-        <div
-          className={`fixed top-4 right-4 z-[120] rounded-2xl border shadow-xl px-4 py-3 flex items-center gap-3 ${
-            dark
-              ? "bg-[#202C33] border-[#3B4A54] text-[#E9EDEF]"
-              : "bg-white border-[#E9EDEF] text-[#111B21]"
-          }`}
-        >
-          <div className="w-9 h-9 rounded-full bg-brand-500 text-white flex items-center justify-center font-semibold">
-            {activeCall.with.full_name?.charAt(0).toUpperCase() || "?"}
+      {/* Active video call — fullscreen (hidden while the incoming modal is up) */}
+      {rtc.call && rtc.call.kind === "video" && !rtc.incoming && (
+        <div className="fixed inset-0 z-[140] bg-black flex flex-col">
+          <video
+            ref={rtc.remoteVideoRef}
+            autoPlay
+            playsInline
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          <video
+            ref={rtc.localVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className="absolute top-4 right-4 w-28 h-36 md:w-40 md:h-52 rounded-xl object-cover shadow-lg border border-white/20 z-10"
+          />
+          <div className="absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-black/70 to-transparent z-10 text-white">
+            <p className="font-semibold text-lg">{rtc.call.peerName}</p>
+            <p className="text-sm opacity-80">{callStatusText}</p>
           </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold truncate">{activeCall.with.full_name}</p>
-            <p
-              className={`text-xs ${
-                activeCall.status === "active"
-                  ? "text-brand-500"
-                  : dark
-                    ? "text-[#8696A0]"
-                    : "text-[#667781]"
-              }`}
+          <div className="absolute bottom-8 inset-x-0 z-10 flex items-center justify-center gap-4">
+            <button
+              onClick={rtc.toggleMic}
+              aria-label={rtc.micOn ? "Mute microphone" : "Unmute microphone"}
+              className="w-14 h-14 rounded-full flex items-center justify-center bg-white/15 text-white backdrop-blur hover:bg-white/25 transition-colors"
             >
-              {activeCall.status === "active"
-                ? `Connected${micReady ? " · mic on" : " · mic off"}`
-                : "Ringing…"}
-            </p>
+              {rtc.micOn ? <Mic size={24} /> : <MicOff size={24} />}
+            </button>
+            <button
+              onClick={rtc.endCall}
+              aria-label="End call"
+              className="w-16 h-16 rounded-full flex items-center justify-center bg-red-500 text-white shadow-lg shadow-red-500/40 hover:bg-red-600 transition-colors"
+            >
+              <PhoneOff size={26} />
+            </button>
+            <button
+              onClick={rtc.toggleCam}
+              aria-label={rtc.camOn ? "Turn camera off" : "Turn camera on"}
+              className="w-14 h-14 rounded-full flex items-center justify-center bg-white/15 text-white backdrop-blur hover:bg-white/25 transition-colors"
+            >
+              {rtc.camOn ? <Camera size={24} /> : <CameraOff size={24} />}
+            </button>
           </div>
-          <button
-            onClick={endCall}
-            className="px-3 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors"
-          >
-            End
-          </button>
         </div>
+      )}
+
+      {/* Active audio call — compact bar (hidden while the incoming modal is up) */}
+      {rtc.call && rtc.call.kind === "audio" && !rtc.incoming && (
+        <>
+          <video ref={rtc.remoteVideoRef} autoPlay playsInline className="hidden" />
+          <video ref={rtc.localVideoRef} autoPlay playsInline muted className="hidden" />
+          <div
+            className={`fixed top-4 right-4 z-[120] rounded-2xl border shadow-xl px-4 py-3 flex items-center gap-3 ${
+              dark
+                ? "bg-[#202C33] border-[#3B4A54] text-[#E9EDEF]"
+                : "bg-white border-[#E9EDEF] text-[#111B21]"
+            }`}
+          >
+            <div className="w-9 h-9 rounded-full bg-brand-500 text-white flex items-center justify-center font-semibold">
+              {rtc.call.peerInitial || "?"}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate">{rtc.call.peerName}</p>
+              <p
+                className={`text-xs ${
+                  rtc.call.status === "active"
+                    ? "text-brand-500"
+                    : dark
+                      ? "text-[#8696A0]"
+                      : "text-[#667781]"
+                }`}
+              >
+                {callStatusText}
+                {rtc.call.status === "active" && !rtc.micOn ? " · muted" : ""}
+              </p>
+            </div>
+            <button
+              onClick={rtc.toggleMic}
+              aria-label={rtc.micOn ? "Mute microphone" : "Unmute microphone"}
+              className={`p-2 rounded-lg transition-colors ${
+                rtc.micOn ? "text-brand-500" : "text-red-500"
+              } ${dark ? "hover:bg-white/10" : "hover:bg-black/5"}`}
+            >
+              {rtc.micOn ? <Mic size={18} /> : <MicOff size={18} />}
+            </button>
+            <button
+              onClick={rtc.endCall}
+              className="px-3 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors"
+            >
+              End
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Call notice toast (declined / busy / no answer) */}
+      {rtc.callNotice && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[125] bg-black/85 text-white text-sm px-4 py-2 rounded-full shadow-lg">
+          {rtc.callNotice}
+        </div>
+      )}
+
+      {/* Story viewer */}
+      {storyTarget && <StoryViewer group={storyTarget} onClose={() => setStoryTarget(null)} />}
+
+      {/* Create group modal */}
+      {showCreateGroup && user?.id && (
+        <CreateGroupModal
+          profiles={profiles}
+          meId={user.id}
+          onClose={() => setShowCreateGroup(false)}
+          onCreated={async (g) => {
+            setShowCreateGroup(false);
+            setNotice("Group created");
+            await loadGroups(user.id);
+            setSelected(null);
+            setSelectedGroup({
+              id: g.id,
+              name: g.name,
+              description: "",
+              avatar_url: g.avatar_url || null,
+              created_by: user.id,
+              member_count: 1,
+            });
+          }}
+        />
       )}
 
       {/* Transient notice */}

@@ -1696,7 +1696,7 @@ export default function ChatPage() {
               <FileCheck size={19} />
             </Link>
             <Link
-              href="/teacher-dashboard"
+              href="/teacher"
               title="Teacher Dashboard"
               aria-label="Teacher Dashboard"
               className={`p-2 rounded-full transition-colors relative ${

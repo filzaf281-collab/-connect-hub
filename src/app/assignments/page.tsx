@@ -250,7 +250,7 @@ export default function AssignmentsPage() {
 
         <div className="flex items-center gap-2.5">
           <Link
-            href="/teacher-dashboard"
+            href="/teacher"
             className={`px-3 py-1.5 rounded-xl text-xs md:text-sm font-medium border transition-colors flex items-center gap-1.5 ${
               dark
                 ? "border-[#3B4A54] hover:bg-white/5 text-[#E9EDEF]"

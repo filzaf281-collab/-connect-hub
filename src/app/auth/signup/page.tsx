@@ -71,7 +71,7 @@ export default function SignupPage() {
     }
 
     if (role === "teacher") {
-      router.push("/teacher-dashboard");
+      router.push("/teacher");
     } else {
       router.push("/chat");
     }

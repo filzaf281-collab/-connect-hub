@@ -79,22 +79,27 @@ export default function StoryViewer({
   if (!story) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] bg-black flex items-center justify-center">
+    <div className="fixed inset-0 z-[200] bg-black flex items-center justify-center select-none">
       {/* Header */}
-      <div className="absolute top-0 inset-x-0 z-10 px-3 pt-3">
+      <div className="absolute top-0 inset-x-0 z-20 px-3 pt-3 bg-gradient-to-b from-black/80 to-transparent pb-6">
         <div className="flex gap-1 mb-2">
           {group.stories.map((s, i) => (
             <div key={s.id} className="flex-1 h-[3px] rounded-full bg-white/30 overflow-hidden">
               <div
-                className="h-full bg-white"
+                className="h-full bg-white transition-all duration-75"
                 style={{ width: i < index ? "100%" : i === index ? `${progress * 100}%` : "0%" }}
               />
             </div>
           ))}
         </div>
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center font-semibold text-white">
-            {group.initial}
+          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-semibold text-white overflow-hidden ring-2 ring-white/40">
+            {group.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={group.avatarUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              group.initial
+            )}
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-white font-semibold text-sm truncate">{group.name}</p>
@@ -102,7 +107,11 @@ export default function StoryViewer({
               {new Date(story.created_at || Date.now()).toLocaleString()}
             </p>
           </div>
-          <button onClick={onClose} aria-label="Close story" className="p-2 text-white">
+          <button
+            onClick={onClose}
+            aria-label="Close story"
+            className="p-2 text-white/80 hover:text-white rounded-full hover:bg-white/10 transition-colors"
+          >
             <X size={26} />
           </button>
         </div>
@@ -112,35 +121,45 @@ export default function StoryViewer({
       <button
         onClick={prev}
         aria-label="Previous story"
-        className="absolute left-0 top-20 bottom-16 w-1/3 flex items-center justify-center text-white/0 hover:text-white/40"
+        className="absolute left-0 top-20 bottom-16 w-1/3 z-10 flex items-center justify-start pl-4 text-white/0 hover:text-white/50 transition-colors"
       >
-        <ChevronLeft size={40} />
+        <ChevronLeft size={44} />
       </button>
       <button
         onClick={next}
         aria-label="Next story"
-        className="absolute right-0 top-20 bottom-16 w-2/3"
-      />
+        className="absolute right-0 top-20 bottom-16 w-2/3 z-10 flex items-center justify-end pr-4 text-white/0 hover:text-white/50 transition-colors"
+      >
+        <ChevronRight size={44} />
+      </button>
 
-      {/* Media */}
-      {isVideo ? (
-        <video
-          ref={videoRef}
-          src={story.media_url}
-          className="max-h-full max-w-full"
-          playsInline
-          muted
-          onEnded={next}
-        />
-      ) : (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={story.media_url} alt={story.caption || "status"} className="max-h-full max-w-full" />
-      )}
+      {/* Media container */}
+      <div className="relative w-full h-full max-w-lg max-h-[92vh] flex items-center justify-center p-4">
+        {isVideo ? (
+          <video
+            ref={videoRef}
+            src={story.media_url}
+            className="max-h-full max-w-full object-contain rounded-xl"
+            playsInline
+            autoPlay
+            onEnded={next}
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={story.media_url}
+            alt={story.caption || "status"}
+            className="max-h-full max-w-full object-contain rounded-xl"
+          />
+        )}
+      </div>
 
       {story.caption && (
-        <p className="absolute bottom-6 inset-x-6 text-center text-white text-sm bg-black/40 rounded-xl px-4 py-2">
-          {story.caption}
-        </p>
+        <div className="absolute bottom-6 inset-x-6 z-20 flex justify-center">
+          <p className="text-center text-white text-sm bg-black/60 backdrop-blur-sm rounded-xl px-4 py-2.5 max-w-md shadow-lg border border-white/10">
+            {story.caption}
+          </p>
+        </div>
       )}
     </div>
   );

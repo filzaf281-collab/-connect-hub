@@ -30,9 +30,17 @@ interface Props {
   profiles: { id: string; full_name: string; avatar_url?: string | null }[];
   onOpenGroup: (g: StoryGroup) => void;
   onNotice: (msg: string) => void;
+  onActiveStoriesChange?: (userIds: Set<string>, groupsMap: Map<string, StoryGroup>) => void;
 }
 
-export default function StoriesBar({ meId, meName, profiles, onOpenGroup, onNotice }: Props) {
+export default function StoriesBar({
+  meId,
+  meName,
+  profiles,
+  onOpenGroup,
+  onNotice,
+  onActiveStoriesChange,
+}: Props) {
   const [groups, setGroups] = useState<StoryGroup[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -52,27 +60,33 @@ export default function StoriesBar({ meId, meName, profiles, onOpenGroup, onNoti
         byUser.set(s.user_id, arr);
       }
       const next: StoryGroup[] = [];
+      const gMap = new Map<string, StoryGroup>();
       byUser.forEach((stories, userId) => {
         const p = profiles.find((x) => x.id === userId);
-        next.push({
+        const groupObj: StoryGroup = {
           userId,
           name: userId === meId ? "My status" : p?.full_name || "Unknown",
           initial: (userId === meId ? meName : p?.full_name || "U").charAt(0).toUpperCase(),
           avatarUrl: userId === meId ? null : p?.avatar_url,
           stories,
-        });
+        };
+        next.push(groupObj);
+        gMap.set(userId, groupObj);
       });
       // Mine first, then alphabetical
       next.sort((a, b) => (a.userId === meId ? -1 : b.userId === meId ? 1 : a.name.localeCompare(b.name)));
       setGroups(next);
+      if (onActiveStoriesChange) {
+        onActiveStoriesChange(new Set(byUser.keys()), gMap);
+      }
     } catch {
       /* table may not exist yet — bar shows just the add button */
     }
-  }, [profiles, meId, meName]);
+  }, [profiles, meId, meName, onActiveStoriesChange]);
 
   useEffect(() => {
     load();
-    const iv = setInterval(load, 60000);
+    const iv = setInterval(load, 30000);
     return () => clearInterval(iv);
   }, [load]);
 
@@ -127,33 +141,38 @@ export default function StoriesBar({ meId, meName, profiles, onOpenGroup, onNoti
       />
       <div className="flex gap-3 overflow-x-auto no-scrollbar">
         {/* My status */}
-        <button
-          onClick={() => (mine ? onOpenGroup(mine) : fileRef.current?.click())}
-          className="shrink-0 flex flex-col items-center gap-1 w-16"
-          aria-label={mine ? "View my status" : "Add status"}
-        >
+        <div className="shrink-0 flex flex-col items-center gap-1 w-16">
           <div
-            className={`relative w-14 h-14 rounded-full p-[2.5px] ${
+            className={`relative w-14 h-14 rounded-full p-[2.5px] cursor-pointer ${
               mine
                 ? "bg-gradient-to-tr from-[#25d366] via-[#128c7e] to-[#075e54]"
                 : "bg-[#E9EDEF] dark:bg-[#3B4A54]"
             }`}
+            onClick={() => (mine ? onOpenGroup(mine) : fileRef.current?.click())}
+            title={mine ? "View my status" : "Add status"}
           >
             <div className="w-full h-full rounded-full bg-white dark:bg-[#111B21] flex items-center justify-center overflow-hidden">
               <span className="text-lg font-semibold text-brand-700 dark:text-[#E9EDEF]">
                 {meName.charAt(0).toUpperCase() || "U"}
               </span>
             </div>
-            {!mine && (
-              <span className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-brand-500 text-white flex items-center text-sm font-bold border-2 border-white dark:border-[#111B21]">
-                +
-              </span>
-            )}
+            {/* Always accessible + button to add new status */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                fileRef.current?.click();
+              }}
+              title="Add status"
+              aria-label="Add status"
+              className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-brand-500 text-white flex items-center justify-center text-sm font-bold border-2 border-white dark:border-[#111B21] hover:scale-110 transition-transform"
+            >
+              +
+            </button>
           </div>
           <span className="text-[10px] text-center text-[#667781] dark:text-[#8696A0] truncate w-16">
             {uploading ? "Adding…" : "My status"}
           </span>
-        </button>
+        </div>
 
         {/* Others' statuses */}
         {groups

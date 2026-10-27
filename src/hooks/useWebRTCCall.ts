@@ -173,6 +173,13 @@ export function useWebRTCCall(
         status: "ringing",
         kind,
       });
+      if (ringTimerRef.current) clearTimeout(ringTimerRef.current);
+      ringTimerRef.current = setTimeout(() => {
+        if (incomingRef.current) {
+          flashNotice("Call timed out");
+          teardown();
+        }
+      }, RING_TIMEOUT_MS);
     } else if (t === "answer") {
       const pc = pcRef.current;
       if (!pc || !p.sdp) return;
@@ -280,13 +287,27 @@ export function useWebRTCCall(
         kind,
       });
 
-      // Join the callee's topic to exchange signaling
-      const ch = supabase
-        .channel(`wcall-${peer.id}`)
-        .on("broadcast", { event: "wcall" }, ({ payload }: any) => handleSignalRef.current(payload))
-        .subscribe();
-      peerChannelRef.current = ch;
-      await new Promise((r) => setTimeout(r, 500)); // let the socket join
+      // Join the callee's topic to exchange signaling (wait for subscription)
+      await new Promise<void>((resolve) => {
+        let done = false;
+        const t = setTimeout(() => {
+          if (!done) {
+            done = true;
+            resolve();
+          }
+        }, 2000);
+        const ch = supabase
+          .channel(`wcall-${peer.id}`)
+          .on("broadcast", { event: "wcall" }, ({ payload }: any) => handleSignalRef.current(payload))
+          .subscribe((status) => {
+            if (status === "SUBSCRIBED" && !done) {
+              done = true;
+              clearTimeout(t);
+              resolve();
+            }
+          });
+        peerChannelRef.current = ch;
+      });
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);

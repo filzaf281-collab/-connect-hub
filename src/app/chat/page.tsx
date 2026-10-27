@@ -27,6 +27,9 @@ import {
   PhoneOff,
   Plus,
   Users,
+  FileText,
+  Download,
+  Trash2,
 } from "lucide-react";
 import AudioPlayer from "../../components/AudioPlayer";
 import StoriesBar, { StoryGroup } from "../../components/StoriesBar";
@@ -301,6 +304,7 @@ export default function ChatPage() {
   const [groupReads, setGroupReads] = useState<{ message_id: string; user_id: string }[]>([]);
   const [groupMembers, setGroupMembers] = useState<Profile[]>([]);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
 
   // Typing + presence (table-backed)
   const [typingMap, setTypingMap] = useState<Record<string, number>>({});
@@ -311,6 +315,8 @@ export default function ChatPage() {
 
   // Stories
   const [storyTarget, setStoryTarget] = useState<StoryGroup | null>(null);
+  const [storyUserIds, setStoryUserIds] = useState<Set<string>>(new Set());
+  const [storyGroupsMap, setStoryGroupsMap] = useState<Map<string, StoryGroup>>(new Map());
 
   // Voice recording
   const [recording, setRecording] = useState(false);
@@ -1233,7 +1239,7 @@ export default function ChatPage() {
         const elapsed = Date.now() - recStartRef.current;
         setRecording(false);
         setRecSeconds(0);
-        if (recCancelRef.current || elapsed < 900) {
+        if (recCancelRef.current || elapsed < 500) {
           recCancelRef.current = false;
           return;
         }
@@ -1343,7 +1349,7 @@ export default function ChatPage() {
   };
 
   // --- Typing indicator push (throttled while composing, delete 2s after idle) ---
-  const resetTypingStop = () => {
+  const resetTypingStop = (delay = 2000) => {
     const myId = user?.id;
     if (!myId) return;
     if (typingStopRef.current) clearTimeout(typingStopRef.current);
@@ -1367,7 +1373,7 @@ export default function ChatPage() {
           /* typing is best-effort */
         }
       })();
-    }, 2000);
+    }, delay);
   };
 
   const pushTyping = () => {
@@ -1430,9 +1436,15 @@ export default function ChatPage() {
 
   const onMenuItem = (action: string) => {
     setShowMenu(false);
-    if (action === "view") setShowContact(true);
+    if (action === "view") {
+      if (selectedGroup) setShowGroupInfo(true);
+      else if (selected) setShowContact(true);
+    }
     else if (action === "wallpaper") setShowWallpaper(true);
-    else if (action === "clear") setMessages([]);
+    else if (action === "clear") {
+      if (selectedGroup) setGroupMessages([]);
+      else setMessages([]);
+    }
     else if (action === "block") setBlocked((b) => !b);
     else if (action === "report") setNotice("Reported. Our team will review this account.");
   };
@@ -1633,6 +1645,10 @@ export default function ChatPage() {
             profiles={profiles}
             onOpenGroup={setStoryTarget}
             onNotice={setNotice}
+            onActiveStoriesChange={(ids, gMap) => {
+              setStoryUserIds(ids);
+              setStoryGroupsMap(gMap);
+            }}
           />
         )}
 
@@ -1696,7 +1712,9 @@ export default function ChatPage() {
                 <p className="text-sm">No users found</p>
               </div>
             ) : (
-              filteredProfiles.map((profile) => (
+              filteredProfiles.map((profile) => {
+                const hasStory = storyUserIds.has(profile.id);
+                return (
                 <div
                   key={profile.id}
                   onClick={() => {
@@ -1713,9 +1731,26 @@ export default function ChatPage() {
                         : "hover:bg-[#F5F6F6] hover:shadow-sm hover:shadow-black/5"
                   }`}
                 >
-                  <div className="relative">
+                  <div
+                    className={`relative shrink-0 ${
+                      hasStory
+                        ? "p-[2.5px] rounded-full bg-gradient-to-tr from-[#25d366] via-[#128c7e] to-[#075e54] cursor-pointer"
+                        : ""
+                    }`}
+                    onClick={(e) => {
+                      if (hasStory && storyGroupsMap.has(profile.id)) {
+                        e.stopPropagation();
+                        setStoryTarget(storyGroupsMap.get(profile.id)!);
+                      }
+                    }}
+                    title={hasStory ? `View ${profile.full_name}'s status` : undefined}
+                  >
                     <div
-                      className={`w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-semibold ring-2 ring-brand-500/20 ${
+                      className={`w-[50px] h-[50px] rounded-full flex items-center justify-center text-lg font-semibold overflow-hidden ${
+                        hasStory
+                          ? "ring-2 ring-white dark:ring-[#111B21]"
+                          : "ring-2 ring-brand-500/20"
+                      } ${
                         dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
                       }`}
                     >
@@ -1747,7 +1782,8 @@ export default function ChatPage() {
                     </p>
                   </div>
                 </div>
-              ))
+                );
+              })
             )
           ) : (
             <>
@@ -1873,61 +1909,70 @@ export default function ChatPage() {
                   <ArrowLeft size={24} />
                 </button>
                 <div
-                  className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-semibold ring-2 ring-brand-500/30 overflow-hidden ${
-                    dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
-                  }`}
+                  className="flex items-center gap-3 min-w-0 cursor-pointer"
+                  onClick={() => {
+                    if (selectedGroup) setShowGroupInfo(true);
+                    else if (selected) setShowContact(true);
+                  }}
+                  title={selectedGroup ? "View group info" : "View contact"}
                 >
-                  {selectedGroup ? (
-                    selectedGroup.avatar_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={selectedGroup.avatar_url}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
+                  <div
+                    className={`w-10 h-10 shrink-0 rounded-full flex items-center justify-center font-semibold ring-2 ring-brand-500/30 overflow-hidden ${
+                      dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
+                    }`}
+                  >
+                    {selectedGroup ? (
+                      selectedGroup.avatar_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={selectedGroup.avatar_url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <Users size={20} />
+                      )
                     ) : (
-                      <Users size={20} />
-                    )
-                  ) : (
-                    selected?.full_name?.charAt(0).toUpperCase() || "U"
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <p
-                    className={`font-semibold truncate ${
-                      dark ? "text-[#E9EDEF]" : "text-[#111B21]"
-                    }`}
-                  >
-                    {selectedGroup ? selectedGroup.name : selected?.full_name || "Unknown User"}
-                    {!selectedGroup && blocked && (
-                      <span className="ml-2 text-xs font-normal text-red-500">(blocked)</span>
+                      selected?.full_name?.charAt(0).toUpperCase() || "U"
                     )}
-                  </p>
-                  <p
-                    className={`text-sm truncate ${
-                      dmTyping || groupTypingNames.length
-                        ? "text-brand-500 font-medium"
-                        : !selectedGroup && (isOnline(selected?.id || "") || peerPresence?.is_online)
+                  </div>
+                  <div className="min-w-0">
+                    <p
+                      className={`font-semibold truncate ${
+                        dark ? "text-[#E9EDEF]" : "text-[#111B21]"
+                      }`}
+                    >
+                      {selectedGroup ? selectedGroup.name : selected?.full_name || "Unknown User"}
+                      {!selectedGroup && blocked && (
+                        <span className="ml-2 text-xs font-normal text-red-500">(blocked)</span>
+                      )}
+                    </p>
+                    <p
+                      className={`text-sm truncate ${
+                        dmTyping || groupTypingNames.length
                           ? "text-brand-500 font-medium"
-                          : dark
-                            ? "text-[#8696A0]"
-                            : "text-[#667781]"
-                    }`}
-                  >
-                    {selectedGroup
-                      ? `${groupTypingNames.length
-                          ? `${groupTypingNames.slice(0, 2).join(", ")}${
-                              groupTypingNames.length > 2 ? " and others" : ""
-                            } is typing…`
-                          : `${groupMemberCount} member${groupMemberCount === 1 ? "" : "s"}`}`
-                      : dmTyping
-                        ? "typing…"
-                        : isOnline(selected?.id || "") || peerPresence?.is_online
-                          ? "online"
-                          : peerPresence?.last_seen
-                            ? `Last seen ${new Date(peerPresence.last_seen).toLocaleString()}`
-                            : "offline"}
-                  </p>
+                          : !selectedGroup && (isOnline(selected?.id || "") || peerPresence?.is_online)
+                            ? "text-brand-500 font-medium"
+                            : dark
+                              ? "text-[#8696A0]"
+                              : "text-[#667781]"
+                      }`}
+                    >
+                      {selectedGroup
+                        ? `${groupTypingNames.length
+                            ? `${groupTypingNames.slice(0, 2).join(", ")}${
+                                groupTypingNames.length > 2 ? " and others" : ""
+                              } is typing…`
+                            : `${groupMemberCount} member${groupMemberCount === 1 ? "" : "s"}`}`
+                        : dmTyping
+                          ? "typing…"
+                          : isOnline(selected?.id || "") || peerPresence?.is_online
+                            ? "online"
+                            : peerPresence?.last_seen
+                              ? `Last seen ${new Date(peerPresence.last_seen).toLocaleString()}`
+                              : "offline"}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -1981,7 +2026,7 @@ export default function ChatPage() {
                       }`}
                     >
                       <button className={menuItemClass(dark)} onClick={() => onMenuItem("view")}>
-                        View Contact
+                        {selectedGroup ? "Group info" : "View contact"}
                       </button>
                       <button
                         className={menuItemClass(dark)}
@@ -1992,20 +2037,24 @@ export default function ChatPage() {
                       <button className={menuItemClass(dark)} onClick={() => onMenuItem("clear")}>
                         Clear Chat
                       </button>
-                      <button
-                        className={`${menuItemClass(dark)} ${
-                          blocked ? "text-brand-500" : "text-red-500"
-                        }`}
-                        onClick={() => onMenuItem("block")}
-                      >
-                        {blocked ? "Unblock User" : "Block User"}
-                      </button>
-                      <button
-                        className={`${menuItemClass(dark)} text-red-500`}
-                        onClick={() => onMenuItem("report")}
-                      >
-                        Report
-                      </button>
+                      {!selectedGroup && (
+                        <>
+                          <button
+                            className={`${menuItemClass(dark)} ${
+                              blocked ? "text-brand-500" : "text-red-500"
+                            }`}
+                            onClick={() => onMenuItem("block")}
+                          >
+                            {blocked ? "Unblock User" : "Block User"}
+                          </button>
+                          <button
+                            className={`${menuItemClass(dark)} text-red-500`}
+                            onClick={() => onMenuItem("report")}
+                          >
+                            Report
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2057,7 +2106,8 @@ export default function ChatPage() {
                             src={item.url}
                             alt="attachment"
                             loading="lazy"
-                            className="rounded-lg max-w-[240px] max-h-[260px] object-cover"
+                            onClick={() => window.open(item.url, "_blank")}
+                            className="rounded-lg max-w-[240px] max-h-[260px] object-cover cursor-pointer hover:opacity-95 transition-opacity"
                           />
                         ) : item.kind === "video" ? (
                           <video
@@ -2074,9 +2124,17 @@ export default function ChatPage() {
                             href={item.url}
                             target="_blank"
                             rel="noreferrer"
-                            className="underline break-all"
+                            download
+                            className="flex items-center gap-3 p-2 rounded-xl bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 transition-colors max-w-xs"
                           >
-                            {fileNameFromUrl(item.url)}
+                            <div className="w-10 h-10 rounded-lg bg-brand-500/20 text-brand-600 dark:text-brand-400 flex items-center justify-center shrink-0">
+                              <FileText size={20} />
+                            </div>
+                            <div className="flex-1 min-w-0 text-left">
+                              <p className="font-medium text-xs truncate underline">{fileNameFromUrl(item.url)}</p>
+                              <p className="text-[10px] opacity-70">Click to download</p>
+                            </div>
+                            <Download size={16} className="opacity-60 shrink-0" />
                           </a>
                         ) : (
                           <p className="break-words whitespace-pre-wrap">{item.text}</p>
@@ -2097,6 +2155,30 @@ export default function ChatPage() {
                     </div>
                   );
                 })
+              )}
+
+              {/* Typing indicator inside message stream */}
+              {(dmTyping || groupTypingNames.length > 0) && (
+                <div className="flex justify-start animate-fade-in py-1">
+                  <div
+                    className={`px-3.5 py-2 rounded-2xl rounded-tl-[4px] text-xs shadow-md flex items-center gap-2 ${
+                      dark ? "bg-[#202C33] text-[#E9EDEF]" : "bg-white text-[#111B21]"
+                    }`}
+                  >
+                    <span className="font-medium text-brand-500">
+                      {selectedGroup
+                        ? `${groupTypingNames.slice(0, 2).join(", ")}${
+                            groupTypingNames.length > 2 ? " and others" : ""
+                          } is typing`
+                        : `${selected?.full_name?.split(" ")[0] || "User"} is typing`}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+                    </span>
+                  </div>
+                </div>
               )}
               <div ref={scrollRef}></div>
             </div>
@@ -2164,39 +2246,71 @@ export default function ChatPage() {
                   tabIndex={-1}
                 />
 
-                {/* Voice message — hold to record, release to send, slide off to cancel */}
-                <button
-                  onPointerDown={(e) => {
-                    e.preventDefault();
-                    startRecording();
-                  }}
-                  onPointerUp={() => stopRecording(false)}
-                  onPointerLeave={() => {
-                    if (recorderRef.current) stopRecording(true);
-                  }}
-                  onPointerCancel={() => stopRecording(true)}
-                  onContextMenu={(e) => e.preventDefault()}
-                  aria-label="Hold to record a voice message"
-                  disabled={uploading || blocked}
-                  style={{ touchAction: "none" }}
-                  className={`p-2 rounded-full transition-colors disabled:opacity-50 ${
-                    recording
-                      ? "text-red-500 animate-pulse bg-red-500/10"
-                      : dark
+                {/* Voice message — hold or tap to record */}
+                {!recording && (
+                  <button
+                    onClick={() => {
+                      if (!recording) startRecording();
+                    }}
+                    onPointerDown={(e) => {
+                      e.preventDefault();
+                      startRecording();
+                    }}
+                    onPointerUp={() => {
+                      if (Date.now() - recStartRef.current >= 800) {
+                        stopRecording(false);
+                      }
+                    }}
+                    onPointerLeave={() => {
+                      if (recorderRef.current && Date.now() - recStartRef.current >= 800) {
+                        stopRecording(true);
+                      }
+                    }}
+                    onPointerCancel={() => stopRecording(true)}
+                    onContextMenu={(e) => e.preventDefault()}
+                    aria-label="Record voice message"
+                    title="Hold or tap to record voice message"
+                    disabled={uploading || blocked}
+                    style={{ touchAction: "none" }}
+                    className={`p-2 rounded-full transition-colors disabled:opacity-50 ${
+                      dark
                         ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
                         : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
-                  }`}
-                >
-                  <Mic size={24} />
-                </button>
+                    }`}
+                  >
+                    <Mic size={24} />
+                  </button>
+                )}
 
                 {recording ? (
-                  <div className="flex-1 flex items-center gap-2 px-4 py-3 rounded-full bg-red-500/10 text-red-500 text-sm font-medium select-none">
-                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
-                    <span className="truncate">
-                      Recording {Math.floor(recSeconds / 60)}:
-                      {(recSeconds % 60).toString().padStart(2, "0")} — release to send
-                    </span>
+                  <div className="flex-1 flex items-center justify-between gap-3 px-4 py-2 rounded-full bg-red-500/10 text-red-500 text-sm font-medium">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+                      <span className="truncate">
+                        Recording {Math.floor(recSeconds / 60)}:
+                        {(recSeconds % 60).toString().padStart(2, "0")}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => stopRecording(true)}
+                        title="Discard recording"
+                        aria-label="Discard recording"
+                        className="p-1.5 rounded-full hover:bg-red-500/20 text-red-600 transition-colors"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => stopRecording(false)}
+                        title="Send voice note"
+                        aria-label="Send voice note"
+                        className="p-1.5 rounded-full bg-brand-500 text-white hover:bg-brand-600 transition-colors shadow-sm"
+                      >
+                        <Send size={16} />
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <form onSubmit={handleSend} className="flex-1 flex items-center gap-2">
@@ -2206,7 +2320,11 @@ export default function ChatPage() {
                       value={newMessage}
                       onChange={(e) => {
                         setNewMessage(e.target.value);
-                        if (e.target.value.trim()) pushTyping();
+                        if (e.target.value.trim()) {
+                          pushTyping();
+                        } else {
+                          resetTypingStop(0);
+                        }
                       }}
                       onKeyDown={handleKeyDown}
                       disabled={blocked}
@@ -2271,6 +2389,91 @@ export default function ChatPage() {
                   {isOnline(selected.id) ? "online" : "offline"}
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Group Info modal */}
+      {showGroupInfo && selectedGroup && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowGroupInfo(false)}
+        >
+          <div
+            className={`w-full max-w-md rounded-2xl p-6 shadow-2xl max-h-[85vh] flex flex-col ${
+              dark ? "bg-[#202C33] text-[#E9EDEF]" : "bg-white text-[#111B21]"
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Group info</h3>
+              <button
+                onClick={() => setShowGroupInfo(false)}
+                aria-label="Close group info"
+                className={`p-1 rounded-full ${dark ? "hover:bg-white/10" : "hover:bg-black/5"}`}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex items-center gap-4 mb-4 pb-4 border-b border-[#E9EDEF] dark:border-[#2A3942]">
+              <div
+                className={`w-16 h-16 rounded-full flex items-center justify-center text-xl font-semibold ring-2 ring-brand-500/30 overflow-hidden shrink-0 ${
+                  dark ? "bg-[#2A3942] text-[#E9EDEF]" : "bg-brand-100 text-brand-700"
+                }`}
+              >
+                {selectedGroup.avatar_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={selectedGroup.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <Users size={28} />
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-lg truncate">{selectedGroup.name}</p>
+                <p className={`text-xs ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
+                  Group · {groupMembers.length || selectedGroup.member_count} member{(groupMembers.length || selectedGroup.member_count) === 1 ? "" : "s"}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs uppercase tracking-wide opacity-60 mb-2 font-medium">
+              Members ({groupMembers.length || selectedGroup.member_count})
+            </p>
+            <div className="flex-1 overflow-y-auto space-y-1.5 -mx-1 px-1">
+              {groupMembers.map((m) => {
+                const online = isOnline(m.id);
+                const isMe = m.id === user?.id;
+                return (
+                  <div
+                    key={m.id}
+                    className="flex items-center gap-3 p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                  >
+                    <div className="relative">
+                      <div className="w-10 h-10 rounded-full bg-brand-100 dark:bg-[#2A3942] flex items-center justify-center font-semibold shrink-0 overflow-hidden">
+                        {m.avatar_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={m.avatar_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          (m.full_name || "U").charAt(0).toUpperCase()
+                        )}
+                      </div>
+                      {online && (
+                        <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-[#202C33]" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {m.full_name || "Unknown"}
+                        {isMe && <span className="ml-1 text-xs opacity-60 font-normal">(You)</span>}
+                      </p>
+                      <p className={`text-xs truncate ${dark ? "text-[#8696A0]" : "text-[#667781]"}`}>
+                        {online ? "online" : m.email || "Member"}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

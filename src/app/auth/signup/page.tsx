@@ -4,13 +4,14 @@ import { supabase } from "../../../lib/supabase";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MessageCircle } from "lucide-react";
+import { MessageCircle, GraduationCap, User } from "lucide-react";
 
 export default function SignupPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [role, setRole] = useState<"student" | "teacher">("student");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,7 +27,10 @@ export default function SignupPage() {
       email,
       password,
       options: {
-        data: { full_name: fullName || email.split("@")[0] || "User" },
+        data: {
+          full_name: fullName || email.split("@")[0] || "User",
+          role: role,
+        },
       },
     });
 
@@ -59,12 +63,18 @@ export default function SignupPage() {
           id: data.user.id,
           email: data.user.email,
           full_name: fullName || data.user.email?.split("@")[0] || "User",
+          role: role,
+          is_teacher: role === "teacher",
         },
         { onConflict: "id" }
       );
     }
 
-    router.push("/chat");
+    if (role === "teacher") {
+      router.push("/teacher-dashboard");
+    } else {
+      router.push("/chat");
+    }
     router.refresh();
   };
 
@@ -90,6 +100,38 @@ export default function SignupPage() {
         )}
 
         <form onSubmit={handleSignup} className="space-y-4">
+          {/* Role Selection */}
+          <div>
+            <label className="block text-sm font-medium mb-2 text-secondary">I am a</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setRole("student")}
+                className={`py-2.5 px-3 rounded-xl border flex items-center justify-center gap-2 font-medium text-sm transition-all ${
+                  role === "student"
+                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/20"
+                    : "border-border text-secondary hover:bg-black/5 dark:hover:bg-white/5"
+                }`}
+              >
+                <User size={16} />
+                <span>Student</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRole("teacher")}
+                className={`py-2.5 px-3 rounded-xl border flex items-center justify-center gap-2 font-medium text-sm transition-all ${
+                  role === "teacher"
+                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-2 ring-emerald-500/20"
+                    : "border-border text-secondary hover:bg-black/5 dark:hover:bg-white/5"
+                }`}
+              >
+                <GraduationCap size={16} />
+                <span>Teacher</span>
+              </button>
+            </div>
+          </div>
+
           <div>
             <label className="block text-sm font-medium mb-2 text-secondary">Full Name</label>
             <input
@@ -141,10 +183,9 @@ export default function SignupPage() {
                 Creating account...
               </>
             ) : (
-              "Sign Up"
+              `Sign Up as ${role.charAt(0).toUpperCase() + role.slice(1)}`
             )}
           </button>
-          {/* Hidden submit keeps Enter-to-submit working while the visible button is type="button" */}
           <button type="submit" className="hidden" tabIndex={-1} aria-hidden="true">
             Sign Up
           </button>

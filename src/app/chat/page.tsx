@@ -30,11 +30,18 @@ import {
   FileText,
   Download,
   Trash2,
+  Sparkles,
+  GraduationCap,
+  FileCheck,
+  Bell,
 } from "lucide-react";
+import Link from "next/link";
 import AudioPlayer from "../../components/AudioPlayer";
 import StoriesBar, { StoryGroup } from "../../components/StoriesBar";
 import StoryViewer from "../../components/StoryViewer";
 import CreateGroupModal from "../../components/CreateGroupModal";
+import SummaryModal from "../../components/SummaryModal";
+import { generateChatSummary, SummaryResult } from "../../lib/summarizer";
 import { useWebRTCCall } from "../../hooks/useWebRTCCall";
 
 interface Profile {
@@ -115,6 +122,7 @@ const OPTIONAL_MSG_COLS = [
   "file_url",
   "file_type",
   "audio_url",
+  "summary",
 ];
 const colSupported: Record<string, boolean> = {};
 // Flipped to false once we learn the read-receipt columns don't exist, so the
@@ -167,7 +175,7 @@ function getTickStatus(msg: Message, myId?: string | null): "sent" | "delivered"
 // Resilient insert for group_messages (file_url / file_type / audio_url /
 // delivered_at only exist after SUPABASE_MEGA_UPGRADE.sql is run).
 // ---------------------------------------------------------------------------
-const OPTIONAL_GROUP_COLS = ["file_url", "file_type", "audio_url"];
+const OPTIONAL_GROUP_COLS = ["file_url", "file_type", "audio_url", "summary"];
 let groupColsSupported = true;
 
 async function insertGroupMessage(payload: Record<string, any>) {
@@ -317,6 +325,10 @@ export default function ChatPage() {
   const [storyTarget, setStoryTarget] = useState<StoryGroup | null>(null);
   const [storyUserIds, setStoryUserIds] = useState<Set<string>>(new Set());
   const [storyGroupsMap, setStoryGroupsMap] = useState<Map<string, StoryGroup>>(new Map());
+
+  // AI Summary Modal state
+  const [summaryData, setSummaryData] = useState<{ title: string; result: SummaryResult } | null>(null);
+  const [newSubmissionsCount, setNewSubmissionsCount] = useState(0);
 
   // Voice recording
   const [recording, setRecording] = useState(false);
@@ -914,6 +926,14 @@ export default function ChatPage() {
           if (r?.user_id && r.user_id === selectedRef.current?.id) setPeerPresence(r);
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "submissions" },
+        ({ payload }: any) => {
+          setNewSubmissionsCount((cnt) => cnt + 1);
+          setNotice(`🔔 New submission received: ${payload?.new?.student_name || "Student"}`);
+        }
+      )
       .subscribe();
     tablesChannelRef.current = channel;
     return () => {
@@ -1136,6 +1156,57 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  };
+
+  // --- AI Chat Summaries (Extractive NLP) ---
+  const handleSummarizeChat = () => {
+    const chatTitle = selectedGroup ? selectedGroup.name : selected?.full_name || "Direct Chat";
+    const chatMsgs = selectedGroup
+      ? groupMessages.map((m) => ({
+          senderName:
+            m.sender_id === user?.id
+              ? "Me"
+              : groupMembers.find((p) => p.id === m.sender_id)?.full_name || "Member",
+          text: m.content || "",
+          created_at: m.created_at,
+        }))
+      : messages.map((m) => ({
+          senderName: m.sender_id === user?.id ? "Me" : selected?.full_name || "User",
+          text: m.content || "",
+          created_at: m.created_at,
+        }));
+
+    const result = generateChatSummary(chatMsgs, chatTitle);
+    setSummaryData({ title: chatTitle, result });
+  };
+
+  const handlePostSummary = async (summaryText: string) => {
+    if (selectedGroup && user?.id) {
+      const { data } = await insertGroupMessage({
+        group_id: selectedGroup.id,
+        sender_id: user.id,
+        content: summaryText,
+        summary: summaryText,
+      });
+      if (data) {
+        setGroupMessages((prev) => (prev.some((m) => m.id === data.id) ? prev : [...prev, data as GroupMessage]));
+      }
+      setNotice("AI Summary posted to group");
+    } else if (selected && user?.id) {
+      const payload: Record<string, any> = {
+        sender_id: user.id,
+        receiver_id: selected.id,
+        conversation_id: convIdRef.current,
+        content: summaryText,
+        summary: summaryText,
+        is_read: false,
+      };
+      const { data } = await insertMessage(payload);
+      if (data) {
+        setMessages((prev) => (prev.some((m) => m.id === data.id) ? prev : [...prev, data as Message]));
+      }
+      setNotice("AI Summary posted to chat");
     }
   };
 
@@ -1612,6 +1683,33 @@ export default function ChatPage() {
             </div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <Link
+              href="/assignments"
+              title="Assignments & Presentations"
+              aria-label="Assignments & Presentations"
+              className={`p-2 rounded-full transition-colors ${
+                dark
+                  ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+              }`}
+            >
+              <FileCheck size={19} />
+            </Link>
+            <Link
+              href="/teacher-dashboard"
+              title="Teacher Dashboard"
+              aria-label="Teacher Dashboard"
+              className={`p-2 rounded-full transition-colors relative ${
+                dark
+                  ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
+              }`}
+            >
+              <GraduationCap size={20} />
+              {newSubmissionsCount > 0 && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              )}
+            </Link>
             <button
               onClick={toggleTheme}
               title="Toggle theme"
@@ -1622,11 +1720,11 @@ export default function ChatPage() {
                   : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
               }`}
             >
-              {dark ? <Moon size={20} /> : <Sun size={20} />}
+              {dark ? <Moon size={19} /> : <Sun size={19} />}
             </button>
             <button
               onClick={handleSignOut}
-              className={`text-sm font-medium px-3 py-1.5 rounded-full transition-colors ${
+              className={`text-xs md:text-sm font-medium px-2.5 py-1.5 rounded-full transition-colors ${
                 dark
                   ? "text-[#8696A0] hover:text-[#E9EDEF] hover:bg-white/10"
                   : "text-gray-600 hover:text-gray-900 hover:bg-black/5"
@@ -1976,7 +2074,22 @@ export default function ChatPage() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* AI Summarize Chat button */}
+                <button
+                  onClick={handleSummarizeChat}
+                  title="Summarize chat with AI"
+                  aria-label="Summarize chat with AI"
+                  className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 text-xs font-semibold ${
+                    dark
+                      ? "bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 shadow-sm"
+                      : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 shadow-sm"
+                  }`}
+                >
+                  <Sparkles size={14} className="text-emerald-500" />
+                  <span className="hidden sm:inline">Summarize</span>
+                </button>
+
                 {!selectedGroup && (
                   <>
                     <button
@@ -2027,6 +2140,15 @@ export default function ChatPage() {
                     >
                       <button className={menuItemClass(dark)} onClick={() => onMenuItem("view")}>
                         {selectedGroup ? "Group info" : "View contact"}
+                      </button>
+                      <button
+                        className={menuItemClass(dark)}
+                        onClick={() => {
+                          setShowMenu(false);
+                          handleSummarizeChat();
+                        }}
+                      >
+                        AI Summary
                       </button>
                       <button
                         className={menuItemClass(dark)}
@@ -2136,6 +2258,14 @@ export default function ChatPage() {
                             </div>
                             <Download size={16} className="opacity-60 shrink-0" />
                           </a>
+                        ) : item.text.startsWith("✨ *AI Discussion Summary") || item.text.includes("*AI Summary") ? (
+                          <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/30 text-xs md:text-sm">
+                            <div className="flex items-center gap-1.5 font-bold text-emerald-600 dark:text-emerald-400 mb-1.5 pb-1 border-b border-emerald-500/20">
+                              <Sparkles size={14} className="text-emerald-500" />
+                              <span>AI Chat Summary</span>
+                            </div>
+                            <p className="break-words whitespace-pre-wrap leading-relaxed">{item.text}</p>
+                          </div>
                         ) : (
                           <p className="break-words whitespace-pre-wrap">{item.text}</p>
                         )}
@@ -2702,6 +2832,17 @@ export default function ChatPage() {
               member_count: 1,
             });
           }}
+        />
+      )}
+
+      {/* AI Summary Modal */}
+      {summaryData && (
+        <SummaryModal
+          title={summaryData.title}
+          summary={summaryData.result}
+          onClose={() => setSummaryData(null)}
+          onPostToChat={handlePostSummary}
+          isDark={dark}
         />
       )}
 

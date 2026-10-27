@@ -21,10 +21,9 @@ export default function SignInPage() {
     setError("");
 
     try {
-      // Always send the real password. (The old code sent an empty string
-      // whenever the "Show" toggle was off, causing "Invalid login credentials".)
+      const cleanEmail = email.trim().toLowerCase();
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email,
+        email: cleanEmail,
         password,
       });
 
@@ -114,8 +113,7 @@ export default function SignInPage() {
           </div>
 
           <button
-            type="button"
-            onClick={handleSignIn}
+            type="submit"
             disabled={loading}
             className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-[0.99] transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
           >
@@ -130,10 +128,6 @@ export default function SignInPage() {
             ) : (
               "Sign In"
             )}
-          </button>
-          {/* Hidden submit keeps Enter-to-submit working while the visible button is type="button" */}
-          <button type="submit" className="hidden" tabIndex={-1} aria-hidden="true">
-            Sign In
           </button>
         </form>
 

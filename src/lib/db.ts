@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
 import prisma from "./prisma";
+import { supabase, DEMO_QUIZ_UUID, normalizeQuizId, isUuid } from "./supabase";
 
 export type UserRole = "TEACHER" | "STUDENT";
 
@@ -106,7 +107,7 @@ function loadLocalStore(): LocalStore {
 
   const defaultQuizzes: QuizRecord[] = [
     {
-      id: "quiz-demo-1",
+      id: DEMO_QUIZ_UUID,
       title: "Web Architecture & Next.js Fundamentals",
       subject: "Computer Science",
       description: "Test your understanding of Next.js 14, server components, and full-stack development.",
@@ -122,7 +123,7 @@ function loadLocalStore(): LocalStore {
   const defaultQuestions: QuestionRecord[] = [
     {
       id: "q-1",
-      quizId: "quiz-demo-1",
+      quizId: DEMO_QUIZ_UUID,
       text: "What rendering strategy is the default for components in the Next.js App Router?",
       options: [
         "Client-Side Rendering (CSR)",
@@ -135,7 +136,7 @@ function loadLocalStore(): LocalStore {
     },
     {
       id: "q-2",
-      quizId: "quiz-demo-1",
+      quizId: DEMO_QUIZ_UUID,
       text: "Which file convention defines the root routing middleware in Next.js?",
       options: ["router.config.ts", "middleware.ts", "server.ts", "app/routes.ts"],
       correctAnswer: 1,
@@ -143,7 +144,7 @@ function loadLocalStore(): LocalStore {
     },
     {
       id: "q-3",
-      quizId: "quiz-demo-1",
+      quizId: DEMO_QUIZ_UUID,
       text: "How are passwords securely stored for authentication in standard modern backends?",
       options: [
         "Base64 encoded string",
@@ -408,9 +409,23 @@ export async function getTeacherQuizzes(teacherId: string): Promise<QuizRecord[]
     (q) => q.teacherId === teacherId || q.teacherEmail?.includes("filzaf281")
   );
 
+  let sbAttemptsByQuiz: Record<string, any[]> = {};
+  try {
+    const { data: sbAtts } = await supabase.from("quiz_attempts").select("*");
+    (sbAtts || []).forEach((att: any) => {
+      if (att.quiz_id) {
+        if (!sbAttemptsByQuiz[att.quiz_id]) sbAttemptsByQuiz[att.quiz_id] = [];
+        sbAttemptsByQuiz[att.quiz_id].push(att);
+      }
+    });
+  } catch (e) {}
+
   return quizzes.map((q) => {
-    const questions = store.questions.filter((qn) => qn.quizId === q.id);
-    const attempts = store.attempts.filter((att) => att.quizId === q.id);
+    const targetId = normalizeQuizId(q.id);
+    const questions = store.questions.filter((qn) => qn.quizId === q.id || qn.quizId === targetId);
+    const sbAttempts = sbAttemptsByQuiz[targetId] || sbAttemptsByQuiz[q.id] || [];
+    const localAttempts = store.attempts.filter((att) => att.quizId === q.id || att.quizId === targetId);
+    const attempts = sbAttempts.length > 0 ? sbAttempts : localAttempts;
     return {
       ...q,
       questions,
@@ -489,7 +504,10 @@ export async function createQuiz(data: {
   }
 
   const store = loadLocalStore();
-  const quizId = `quiz-${Date.now()}`;
+  const quizId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `e1a1${Date.now()}`.padEnd(36, "0");
+  try {
+    Promise.resolve(supabase.from("quizzes").insert({ id: quizId, title: data.title, description: data.description || null })).catch(() => {});
+  } catch (e) {}
   const newQuiz: QuizRecord = {
     id: quizId,
     title: data.title,
@@ -593,11 +611,34 @@ export async function getQuizWithAttempts(quizId: string): Promise<QuizRecord | 
   }
 
   const store = loadLocalStore();
-  const quiz = store.quizzes.find((q) => q.id === quizId);
+  const targetQuizId = normalizeQuizId(quizId);
+  const quiz = store.quizzes.find((q) => q.id === targetQuizId || q.id === quizId || (targetQuizId === DEMO_QUIZ_UUID && (q.id === "quiz-demo-1" || q.id === DEMO_QUIZ_UUID)));
   if (!quiz) return null;
 
-  const questions = store.questions.filter((qn) => qn.quizId === quizId);
-  const attempts = store.attempts.filter((att) => att.quizId === quizId);
+  const questions = store.questions.filter((qn) => qn.quizId === targetQuizId || qn.quizId === quizId || (targetQuizId === DEMO_QUIZ_UUID && (qn.quizId === "quiz-demo-1" || qn.quizId === DEMO_QUIZ_UUID)));
+  let attempts = store.attempts.filter((att) => att.quizId === targetQuizId || att.quizId === quizId);
+  try {
+    const { data: sbAtt } = await supabase.from("quiz_attempts").select("*").eq("quiz_id", targetQuizId);
+    if (sbAtt && sbAtt.length > 0) {
+      const studentIds = sbAtt.map((a) => a.student_id).filter(Boolean);
+      let pMap: Record<string, any> = {};
+      if (studentIds.length > 0) {
+        const { data: profs } = await supabase.from("profiles").select("id, full_name, email").in("id", studentIds);
+        (profs || []).forEach((pr) => { pMap[pr.id] = pr; });
+      }
+      attempts = sbAtt.map((a) => ({
+        id: a.id,
+        quizId: targetQuizId,
+        studentId: a.student_id || "student-1",
+        studentName: pMap[a.student_id]?.full_name || "Student",
+        studentEmail: pMap[a.student_id]?.email || "",
+        score: Number(a.score || 0),
+        maxScore: Number(a.total || 30),
+        answers: {},
+        createdAt: a.created_at || new Date().toISOString(),
+      }));
+    }
+  } catch (e) {}
 
   return {
     ...quiz,
@@ -766,6 +807,20 @@ export async function submitQuizAttempt(data: {
     } catch (err) {
       console.warn("Prisma submitQuizAttempt error, saving locally:", (err as any)?.message);
     }
+  }
+
+  const targetQuizId = normalizeQuizId(data.quizId);
+  attemptRecord.quizId = targetQuizId;
+
+  try {
+    await supabase.from("quiz_attempts").insert({
+      quiz_id: targetQuizId,
+      student_id: isUuid(data.studentId) ? data.studentId : null,
+      score: totalScore,
+      total: maxScore,
+    });
+  } catch (sbErr) {
+    console.warn("[submitQuizAttempt] Supabase insert notice:", sbErr);
   }
 
   const store = loadLocalStore();

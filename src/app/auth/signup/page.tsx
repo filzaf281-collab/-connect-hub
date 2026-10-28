@@ -22,60 +22,76 @@ export default function SignupPage() {
     setError("");
     setNotice("");
 
-    // Let Supabase auth handle existence checks — no manual pre-check.
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName || email.split("@")[0] || "User",
-          role: role,
+    const cleanEmail = email.trim().toLowerCase();
+    const upperRole = role.toUpperCase(); // 'TEACHER' or 'STUDENT'
+
+    try {
+      // 1. Call backend NextAuth / Prisma DB signup API
+      const apiRes = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: cleanEmail,
+          password,
+          name: fullName || cleanEmail.split("@")[0] || "User",
+          role: upperRole,
+        }),
+      });
+
+      const apiData = await apiRes.json();
+
+      if (!apiRes.ok && apiRes.status !== 409) {
+        console.warn("[SignUp] API signup error:", apiData.error);
+      }
+
+      // 2. Also register in Supabase in background for realtime chat
+      supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          data: {
+            full_name: fullName || cleanEmail.split("@")[0] || "User",
+            role: role,
+          },
         },
-      },
-    });
+      }).then(({ data: sbData }) => {
+        if (sbData?.user) {
+          supabase.from("profiles").upsert(
+            {
+              id: sbData.user.id,
+              email: sbData.user.email,
+              full_name: fullName || cleanEmail.split("@")[0] || "User",
+              role: role,
+              is_teacher: role === "teacher",
+            },
+            { onConflict: "id" }
+          ).then(() => {}, () => {});
+        }
+      }).catch((sbErr) => {
+        console.warn("[SignUp] Supabase background note:", sbErr?.message);
+      });
 
-    if (signUpError) {
-      console.log("Sign-up error:", signUpError.message);
-      setError(signUpError.message);
+      if (!apiRes.ok && !apiData.success && apiRes.status !== 409) {
+        setError(apiData.error || "Failed to create account");
+        setLoading(false);
+        return;
+      }
+
+      // 3. Redirect strictly based on Role:
+      // TEACHER -> /teacher/dashboard
+      // STUDENT -> /student/dashboard
+      console.log(`[SignUp] Success for ${cleanEmail}! Redirecting based on role: ${upperRole}`);
+      if (role === "teacher") {
+        router.push("/teacher/dashboard");
+      } else {
+        router.push("/student/dashboard");
+      }
+      router.refresh();
+    } catch (err: any) {
+      console.error("[SignUp] Exception:", err);
+      setError(err?.message || "Something went wrong. Please try again.");
       setLoading(false);
-      return;
     }
-
-    // Supabase returns a user with an EMPTY identities array when the email
-    // is already registered. Surface a friendly message instead of failing.
-    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-      setError("This email is already registered. Please sign in instead.");
-      setLoading(false);
-      return;
-    }
-
-    // If email confirmation is ON, there is no session yet.
-    if (!data.session) {
-      setNotice("Almost there! Check your email to confirm your account, then sign in.");
-      setLoading(false);
-      return;
-    }
-
-    // Email confirmation is OFF — create/update the profile, then go to chat.
-    if (data.user) {
-      await supabase.from("profiles").upsert(
-        {
-          id: data.user.id,
-          email: data.user.email,
-          full_name: fullName || data.user.email?.split("@")[0] || "User",
-          role: role,
-          is_teacher: role === "teacher",
-        },
-        { onConflict: "id" }
-      );
-    }
-
-    if (role === "teacher") {
-      router.push("/teacher");
-    } else {
-      router.push("/chat");
-    }
-    router.refresh();
   };
 
   return (
@@ -85,7 +101,7 @@ export default function SignupPage() {
           <MessageCircle size={40} className="text-[#00A884]" />
         </div>
         <h2 className="text-2xl font-bold text-center text-primary mb-1">Create your account</h2>
-        <p className="text-center text-secondary text-sm mb-6">Join ConnectHub to start chatting</p>
+        <p className="text-center text-secondary text-sm mb-6">Join ConnectHub to start learning & chatting</p>
 
         {error && (
           <div className="bg-red-500/10 border-l-4 border-red-500 text-red-600 dark:text-red-400 rounded p-3 mb-4 text-sm">
@@ -169,8 +185,7 @@ export default function SignupPage() {
           </div>
 
           <button
-            type="button"
-            onClick={handleSignup}
+            type="submit"
             disabled={loading}
             className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-[0.99] transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
           >
@@ -185,9 +200,6 @@ export default function SignupPage() {
             ) : (
               `Sign Up as ${role.charAt(0).toUpperCase() + role.slice(1)}`
             )}
-          </button>
-          <button type="submit" className="hidden" tabIndex={-1} aria-hidden="true">
-            Sign Up
           </button>
         </form>
 

@@ -525,8 +525,16 @@ export default function TeacherPage() {
             </p>
           </div>
 
-          {/* Action Buttons required: Create Assignment, View Submissions, Manage Students */}
+          {/* Action Buttons required: Create Assignment, View Submissions, Manage Students, Quizzes */}
           <div className="flex flex-wrap items-center gap-2.5">
+            <Link
+              href="/teacher/quizzes"
+              className="px-4 py-2.5 rounded-xl font-medium text-xs md:text-sm bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-sm flex items-center gap-2 transition hover:opacity-95"
+            >
+              <FileText size={16} />
+              <span>Quizzes System</span>
+            </Link>
+
             <button
               onClick={() => setShowCreateModal(true)}
               className="px-4 py-2.5 rounded-xl font-medium text-xs md:text-sm bg-[#00A884] hover:bg-[#008F72] text-white shadow-sm flex items-center gap-2 transition"

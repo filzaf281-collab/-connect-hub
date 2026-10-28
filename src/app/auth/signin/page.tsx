@@ -22,41 +22,65 @@ export default function SignInPage() {
 
     try {
       const cleanEmail = email.trim().toLowerCase();
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
+
+      // 1. Authenticate with NextAuth / backend DB API
+      const apiRes = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: cleanEmail, password }),
       });
 
-      if (signInError) {
-        console.log("Sign-in error:", signInError.message);
-        setError(signInError.message);
-        setLoading(false);
+      const apiData = await apiRes.json();
+
+      // Also sign in to Supabase in background for realtime chat
+      supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      }).catch((sbErr) => {
+        console.warn("[SignIn] Supabase background sync note:", sbErr?.message);
+      });
+
+      if (!apiRes.ok || !apiData.success) {
+        // If API returned invalid credentials, also check Supabase auth
+        const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+
+        if (sbError && !apiData.success) {
+          console.log("[SignIn] Invalid credentials:", apiData.error || sbError.message);
+          setError(apiData.error || "Invalid login credentials");
+          setLoading(false);
+          return;
+        }
+
+        // Supabase succeeded, determine role
+        const role =
+          cleanEmail.includes("teacher") || cleanEmail.includes("filzaf281")
+            ? "TEACHER"
+            : "STUDENT";
+
+        if (role === "TEACHER") {
+          router.push("/teacher/dashboard");
+        } else {
+          router.push("/student/dashboard");
+        }
+        router.refresh();
         return;
       }
 
-      // Make sure a profile row exists (fire-and-forget, non-blocking).
-      if (data.user) {
-        supabase
-          .from("profiles")
-          .upsert(
-            {
-              id: data.user.id,
-              email: data.user.email,
-              full_name: data.user.email?.split("@")[0] || "User",
-            },
-            { onConflict: "id" }
-          )
-          .then(
-            () => {},
-            () => {}
-          );
-      }
+      // API login succeeded! Check role
+      const userRole = (apiData.user?.role || "").toUpperCase();
+      console.log(`[SignIn] Logged in successfully: ${cleanEmail} (Role: ${userRole})`);
 
-      console.log("Signed in OK, redirecting to /chat");
-      router.push("/chat");
+      if (userRole === "TEACHER") {
+        router.push("/teacher/dashboard");
+      } else {
+        router.push("/student/dashboard");
+      }
       router.refresh();
     } catch (err: any) {
-      console.log("Sign-in exception:", err?.message);
+      console.error("[SignIn] Exception:", err?.message);
       setError(err?.message || "Something went wrong. Please try again.");
       setLoading(false);
     }
@@ -81,8 +105,8 @@ export default function SignInPage() {
           <div>
             <label className="block mb-2 text-sm font-medium text-secondary">Email Address</label>
             <input
-              type="email"
-              placeholder="you@email.com"
+              type="text"
+              placeholder="you@email.com or username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required

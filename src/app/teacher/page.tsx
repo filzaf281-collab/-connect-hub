@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useTheme } from "next-themes";
 import { supabase } from "../../lib/supabase";
@@ -64,6 +64,7 @@ interface Profile {
 
 export default function TeacherPage() {
   const router = useRouter();
+  const pathname = usePathname();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const dark = theme === "dark";
@@ -73,9 +74,18 @@ export default function TeacherPage() {
   const [authLoading, setAuthLoading] = useState(true);
 
   // Active view: 'assignments' | 'submissions' | 'students'
-  const [activeTab, setActiveTab] = useState<"assignments" | "submissions" | "students">("assignments");
+  const isStudentsRoute = typeof pathname === "string" && pathname.includes("/students");
+  const [activeTab, setActiveTab] = useState<"assignments" | "submissions" | "students">(
+    isStudentsRoute ? "students" : "assignments"
+  );
 
   // Data states
+  useEffect(() => {
+    if (pathname?.includes("/students")) {
+      setActiveTab("students");
+    }
+  }, [pathname]);
+
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [students, setStudents] = useState<Profile[]>([]);
@@ -598,8 +608,11 @@ export default function TeacherPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab("students")}
-              className={`px-4 py-2.5 rounded-xl font-medium text-xs md:text-sm border transition flex items-center gap-2 ${
+              onClick={() => {
+                setActiveTab("students");
+                router.push("/teacher/students");
+              }}
+              className={`cursor-pointer select-none px-4 py-2.5 rounded-xl font-medium text-xs md:text-sm border transition flex items-center gap-2 ${
                 activeTab === "students"
                   ? "bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400 font-semibold"
                   : dark
@@ -654,8 +667,11 @@ export default function TeacherPage() {
           </div>
 
           <div
-            onClick={() => setActiveTab("students")}
-            className={`p-4 md:p-5 rounded-2xl border shadow-sm cursor-pointer transition hover:scale-[1.01] ${
+            onClick={() => {
+              setActiveTab("students");
+              router.push("/teacher/students");
+            }}
+            className={`cursor-pointer select-none p-4 md:p-5 rounded-2xl border shadow-sm transition hover:scale-[1.01] ${
               activeTab === "students" ? "ring-2 ring-emerald-500/50" : ""
             } ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"}`}
           >

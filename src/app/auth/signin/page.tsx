@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "../../../lib/supabase";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageCircle, Eye, EyeOff } from "lucide-react";
@@ -13,6 +13,20 @@ export default function SignInPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // If already authenticated, redirect to appropriate role dashboard
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.user?.role === "TEACHER") {
+          router.replace("/teacher/dashboard");
+        } else if (data?.user?.role === "STUDENT") {
+          router.replace("/student/dashboard");
+        }
+      })
+      .catch(() => {});
+  }, [router]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,13 +46,15 @@ export default function SignInPage() {
 
       const apiData = await apiRes.json();
 
-      // Also sign in to Supabase in background for realtime chat
-      supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
-      }).catch((sbErr) => {
+      // Also sign in to Supabase for realtime chat session
+      try {
+        await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+      } catch (sbErr: any) {
         console.warn("[SignIn] Supabase background sync note:", sbErr?.message);
-      });
+      }
 
       if (!apiRes.ok || !apiData.success) {
         // If API returned invalid credentials, also check Supabase auth
@@ -54,11 +70,24 @@ export default function SignInPage() {
           return;
         }
 
-        // Supabase succeeded, determine role
-        const role =
-          cleanEmail.includes("teacher") || cleanEmail.includes("filzaf281")
-            ? "TEACHER"
-            : "STUDENT";
+        // Supabase succeeded, determine actual role from database
+        let role = "STUDENT";
+        try {
+          const { data: prof } = await supabase
+            .from("profiles")
+            .select("role, is_teacher")
+            .ilike("email", cleanEmail)
+            .maybeSingle();
+
+          if (
+            prof?.role?.toLowerCase() === "teacher" ||
+            prof?.is_teacher === true ||
+            cleanEmail.includes("teacher") ||
+            cleanEmail.includes("filzaf281")
+          ) {
+            role = "TEACHER";
+          }
+        } catch (e) {}
 
         if (role === "TEACHER") {
           router.push("/teacher/dashboard");
@@ -103,35 +132,38 @@ export default function SignInPage() {
 
         <form onSubmit={handleSignIn} className="space-y-4">
           <div>
-            <label className="block mb-2 text-sm font-medium text-secondary">Email Address</label>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Email Address
+            </label>
             <input
               type="text"
-              placeholder="you@email.com or username"
+              required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full bg-input border border-border rounded-xl px-4 py-3 text-foreground transition hover:border-brand-500/50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500"
+              placeholder="name@connecthub.com"
+              className="w-full px-4 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-[#00A884]"
             />
           </div>
 
           <div>
-            <label className="block mb-2 text-sm font-medium text-secondary">Password</label>
+            <label className="block text-sm font-medium text-foreground mb-1">
+              Password
+            </label>
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
-                placeholder="••••••••"
+                required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full bg-input border border-border rounded-xl px-4 py-3 pr-12 text-foreground transition hover:border-brand-500/50 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500"
+                placeholder="••••••••"
+                className="w-full px-4 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-[#00A884] pr-10"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-secondary hover:text-brand-500 hover:bg-brand-500/10 transition-colors"
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
               >
-                {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
@@ -139,28 +171,18 @@ export default function SignInPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#111111] hover:bg-black text-white font-medium py-3.5 rounded-xl shadow-lg hover:shadow-xl active:scale-[0.99] transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
+            className="w-full bg-[#00A884] hover:bg-[#00A884]/90 text-white font-semibold py-2 rounded-md transition duration-200 disabled:opacity-50"
           >
-            {loading ? (
-              <>
-                <span
-                  className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"
-                  aria-hidden="true"
-                />
-                Signing in...
-              </>
-            ) : (
-              "Sign In"
-            )}
+            {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
 
-        <p className="text-center text-sm text-secondary mt-6">
+        <div className="mt-6 text-center text-sm text-muted-foreground">
           Don&apos;t have an account?{" "}
-          <Link href="/auth/signup" className="font-medium text-[#00A884] hover:underline">
-            Sign Up
+          <Link href="/auth/signup" className="text-[#00A884] hover:underline font-medium">
+            Sign up
           </Link>
-        </p>
+        </div>
       </div>
     </div>
   );

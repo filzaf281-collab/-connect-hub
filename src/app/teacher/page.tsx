@@ -118,54 +118,94 @@ export default function TeacherPage() {
 
     async function checkAuthAndRole() {
       try {
-        const {
-          data: { user: currentUser },
-        } = await supabase.auth.getUser();
+        // 1. Check ConnectHub session endpoint
+        let sessionUser: any = null;
+        try {
+          const res = await fetch("/api/auth/session");
+          const data = await res.json();
+          sessionUser = data?.user;
+        } catch (e) {}
+
+        // 2. Also check Supabase client auth
+        let sbUser: any = null;
+        try {
+          const { data } = await supabase.auth.getUser();
+          sbUser = data?.user;
+        } catch (e) {}
 
         if (!active) return;
 
-        if (!currentUser) {
+        const activeUser = sessionUser || sbUser;
+
+        if (!activeUser) {
+          console.log("[TeacherPage] No active session. Redirecting to /auth/signin");
           router.push("/auth/signin");
           return;
         }
 
-        setUser(currentUser);
+        // If active session role is STUDENT, route them to student dashboard
+        if (sessionUser?.role === "STUDENT") {
+          console.log("[TeacherPage] Student accessed teacher route. Redirecting to /student/dashboard");
+          router.push("/student/dashboard");
+          return;
+        }
 
-        // Fetch profile to verify role
-        const { data: profileData } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", currentUser.id)
-          .maybeSingle();
+        setUser(activeUser);
+
+        // Fetch profile from Supabase profiles
+        let profileData: any = null;
+        if (activeUser.id) {
+          const { data } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", activeUser.id)
+            .maybeSingle();
+          profileData = data;
+        }
+
+        if (!profileData && activeUser.email) {
+          const { data } = await supabase
+            .from("profiles")
+            .select("*")
+            .ilike("email", activeUser.email)
+            .maybeSingle();
+          profileData = data;
+        }
 
         if (!active) return;
 
-        const role = profileData?.role?.toLowerCase();
+        const role = (profileData?.role || sessionUser?.role || "").toString().toLowerCase();
         const isTeacherFlag = profileData?.is_teacher === true;
-        const emailLower = (currentUser.email || "").toLowerCase();
+        const emailLower = (activeUser.email || "").toLowerCase();
 
-        // Check if user role == teacher
-        // Filzaf281 is the instructor/admin, so always authorize filzaf281
         const isTeacher =
           role === "teacher" ||
           isTeacherFlag ||
+          sessionUser?.role === "TEACHER" ||
           emailLower.includes("teacher") ||
           emailLower.includes("filzaf281") ||
           emailLower.endsWith(".edu");
 
         if (!isTeacher) {
-          // Non-teachers are redirected to /chat
-          console.warn("User is not a teacher. Redirecting to /chat");
-          router.push("/chat");
+          console.warn("[TeacherPage] User is not a teacher. Redirecting to /student/dashboard");
+          router.push("/student/dashboard");
           return;
         }
 
-        setProfile(profileData || null);
+        setProfile(
+          profileData || {
+            id: activeUser.id,
+            email: activeUser.email,
+            full_name: activeUser.name || activeUser.email?.split("@")[0] || "Teacher",
+            role: "teacher",
+            is_teacher: true,
+          }
+        );
         setAuthLoading(false);
         await loadAllData();
       } catch (err) {
-        console.error("Auth check failed:", err);
-        router.push("/chat");
+        console.error("[TeacherPage] Auth check error:", err);
+        setAuthLoading(false);
       }
     }
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { cleanEmail, hashPassword, signUserToken, AUTH_COOKIE_NAME } from "@/lib/auth";
 import { createUser, findUserByEmail, UserRole } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function POST(req: NextRequest) {
   try {
@@ -50,6 +51,19 @@ export async function POST(req: NextRequest) {
       name: name || email.split("@")[0],
       role,
     });
+
+    // Also sync role in Supabase profiles if record exists
+    try {
+      await supabase
+        .from("profiles")
+        .update({
+          role: role === "TEACHER" ? "teacher" : "student",
+          is_teacher: role === "TEACHER",
+        })
+        .ilike("email", email);
+    } catch (sbErr) {
+      console.warn("[Signup API] Supabase profile sync notice:", sbErr);
+    }
 
     console.log(`[Signup API] User created successfully: ${user.email} (ID: ${user.id}, Role: ${user.role})`);
 

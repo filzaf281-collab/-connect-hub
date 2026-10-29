@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "../../../lib/supabase";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageCircle, GraduationCap, User } from "lucide-react";
@@ -15,6 +15,20 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // If already authenticated, redirect immediately
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.user?.role === "TEACHER") {
+          router.replace("/teacher/dashboard");
+        } else if (data?.user?.role === "STUDENT") {
+          router.replace("/student/dashboard");
+        }
+      })
+      .catch(() => {});
+  }, [router]);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,36 +54,34 @@ export default function SignupPage() {
 
       const apiData = await apiRes.json();
 
-      if (!apiRes.ok && apiRes.status !== 409) {
-        console.warn("[SignUp] API signup error:", apiData.error);
-      }
-
-      // 2. Also register in Supabase in background for realtime chat
-      supabase.auth.signUp({
-        email: cleanEmail,
-        password,
-        options: {
-          data: {
-            full_name: fullName || cleanEmail.split("@")[0] || "User",
-            role: role,
+      // 2. Also register in Supabase for realtime chat session
+      try {
+        const { data: sbData } = await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: {
+            data: {
+              full_name: fullName || cleanEmail.split("@")[0] || "User",
+              role: role,
+            },
           },
-        },
-      }).then(({ data: sbData }) => {
+        });
+
         if (sbData?.user) {
-          supabase.from("profiles").upsert(
+          await supabase.from("profiles").upsert(
             {
               id: sbData.user.id,
-              email: sbData.user.email,
+              email: cleanEmail,
               full_name: fullName || cleanEmail.split("@")[0] || "User",
               role: role,
               is_teacher: role === "teacher",
             },
             { onConflict: "id" }
-          ).then(() => {}, () => {});
+          );
         }
-      }).catch((sbErr) => {
+      } catch (sbErr: any) {
         console.warn("[SignUp] Supabase background note:", sbErr?.message);
-      });
+      }
 
       if (!apiRes.ok && !apiData.success && apiRes.status !== 409) {
         setError(apiData.error || "Failed to create account");
@@ -81,7 +93,7 @@ export default function SignupPage() {
       // TEACHER -> /teacher/dashboard
       // STUDENT -> /student/dashboard
       console.log(`[SignUp] Success for ${cleanEmail}! Redirecting based on role: ${upperRole}`);
-      if (role === "teacher") {
+      if (role === "teacher" || upperRole === "TEACHER") {
         router.push("/teacher/dashboard");
       } else {
         router.push("/student/dashboard");

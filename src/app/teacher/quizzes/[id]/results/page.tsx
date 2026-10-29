@@ -50,10 +50,13 @@ export default function QuizResultsPage({
     quiz?.questions?.reduce((sum: number, q: any) => sum + (q.points || 10), 0) || 0;
 
   const attempts = quiz?.attempts || [];
+  const uniqueStudents = new Set(
+    attempts.map((a: any) => a.studentId || a.studentEmail || a.id)
+  ).size;
   const averageScore =
     attempts.length > 0
       ? (
-          attempts.reduce((sum: number, a: any) => sum + a.score, 0) / attempts.length
+          attempts.reduce((sum: number, a: any) => sum + Number(a.score || 0), 0) / attempts.length
         ).toFixed(1)
       : "0";
 
@@ -150,6 +153,12 @@ export default function QuizResultsPage({
                     </p>
                   </div>
                   <div className="text-center px-4 py-2 rounded-xl bg-black/5 dark:bg-white/5">
+                    <p className="text-xs opacity-60">Unique Students</p>
+                    <p className="text-2xl font-extrabold text-purple-500">
+                      {uniqueStudents}
+                    </p>
+                  </div>
+                  <div className="text-center px-4 py-2 rounded-xl bg-black/5 dark:bg-white/5">
                     <p className="text-xs opacity-60">Avg Score</p>
                     <p className="text-2xl font-extrabold text-blue-500">
                       {averageScore} / {maxPoints}
@@ -168,7 +177,7 @@ export default function QuizResultsPage({
               <div className="p-4 border-b border-black/10 dark:border-white/10 flex items-center justify-between">
                 <h3 className="font-bold text-sm md:text-base flex items-center gap-2">
                   <Users size={16} className="text-[#00A884]" />
-                  <span>Student Submissions ({attempts.length})</span>
+                  <span>Student Submissions ({attempts.length} attempts · {uniqueStudents} unique students)</span>
                 </h3>
               </div>
 

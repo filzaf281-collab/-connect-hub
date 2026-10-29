@@ -33,6 +33,7 @@ export interface QuizAttemptRecord {
   studentEmail?: string;
   score: number;
   maxScore?: number;
+  percentage?: number;
   answers: any;
   createdAt: string;
 }
@@ -59,10 +60,119 @@ interface LocalStore {
   attempts: QuizAttemptRecord[];
 }
 
+export const WEB_DEV_FUNDAMENTALS_UUID = "1c3b49a6-0478-473d-adb9-57654670f1e7";
+
+export const WEB_DEV_FUNDAMENTALS_QUESTIONS: QuestionRecord[] = [
+  {
+    id: "wdf-q1",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "What does HTML stand for in web development?",
+    options: [
+      "HyperText Markup Language",
+      "High Tech Modern Language",
+      "Hyperlink and Text Model Language",
+      "Home Tool Management Language",
+    ],
+    correctAnswer: 0,
+    points: 10,
+  },
+  {
+    id: "wdf-q2",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "Which HTML5 semantic tag is recommended for defining primary website navigation links?",
+    options: ["<navigation>", "<nav>", "<menu>", "<section class=\"nav\">"],
+    correctAnswer: 1,
+    points: 10,
+  },
+  {
+    id: "wdf-q3",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "In the CSS box model, which layer provides space between the element's content and its border?",
+    options: ["Margin", "Outline", "Padding", "Spacing"],
+    correctAnswer: 2,
+    points: 10,
+  },
+  {
+    id: "wdf-q4",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "Which CSS Flexbox property specifies the alignment of items along the main axis?",
+    options: ["align-items", "justify-content", "flex-direction", "align-content"],
+    correctAnswer: 1,
+    points: 10,
+  },
+  {
+    id: "wdf-q5",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "Which CSS Media Query correctly targets viewport widths that are at least 768px wide?",
+    options: [
+      "@media screen and (min-width: 768px)",
+      "@media screen and (max-device-width: 768px)",
+      "@media (viewport-width: 768px)",
+      "@media only (width = 768px)",
+    ],
+    correctAnswer: 0,
+    points: 10,
+  },
+  {
+    id: "wdf-q6",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "Which keyword was introduced in modern JavaScript (ES6) to declare a block-scoped variable that cannot be reassigned?",
+    options: ["var", "let", "const", "final"],
+    correctAnswer: 2,
+    points: 10,
+  },
+  {
+    id: "wdf-q7",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "Which modern DOM method selects the first element matching a specified CSS selector in a web document?",
+    options: [
+      "document.getElementsByClassName()",
+      "document.querySelector()",
+      "document.getElementByIdFirst()",
+      "document.selectFirstNode()",
+    ],
+    correctAnswer: 1,
+    points: 10,
+  },
+  {
+    id: "wdf-q8",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "Which method is the standard way to attach an event handler to a button in JavaScript without overwriting other handlers?",
+    options: [
+      "button.addEventListener('click', handler)",
+      "button.onclick = handler",
+      "button.attachEvent('click', handler)",
+      "button.bind('click', handler)",
+    ],
+    correctAnswer: 0,
+    points: 10,
+  },
+  {
+    id: "wdf-q9",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "What is the primary security advantage of HTTPS compared to standard HTTP?",
+    options: [
+      "HTTPS compresses web traffic so pages load significantly faster",
+      "HTTPS uses TLS/SSL encryption to secure communications and prevent eavesdropping",
+      "HTTPS bypasses client-side caching to prevent stale pages",
+      "HTTPS operates on port 80 instead of port 443",
+    ],
+    correctAnswer: 1,
+    points: 10,
+  },
+  {
+    id: "wdf-q10",
+    quizId: WEB_DEV_FUNDAMENTALS_UUID,
+    text: "Which HTTP response status code indicates that a requested resource was successfully created on the server?",
+    options: ["200 OK", "201 Created", "204 No Content", "301 Moved Permanently"],
+    correctAnswer: 1,
+    points: 10,
+  },
+];
+
 const LOCAL_STORE_FILE = path.join(process.cwd(), ".db-store.json");
 
 // Default initial seed data with bcrypt-hashed passwords for '12345678'
-// bcrypt hash of '12345678' with 10 rounds:
 const DEFAULT_HASH_12345678 = "$2a$10$wT37tV.r3XJ8hR8M0qB6p.s5eXl4d5w0lBfRjL5mE8q7A8N.d2EWW";
 
 function loadLocalStore(): LocalStore {
@@ -176,6 +286,26 @@ function saveLocalStore(store: LocalStore) {
   }
 }
 
+
+async function isStudentRequest(): Promise<boolean> {
+  try {
+    const { cookies } = await import('next/headers');
+    const cookieStore = await cookies();
+    const token =
+      cookieStore.get('connecthub_session_token')?.value ||
+      cookieStore.get('next-auth.session-token')?.value ||
+      cookieStore.get('__Secure-next-auth.session-token')?.value;
+
+    if (!token) return false;
+    const jwt = await import('jsonwebtoken');
+    const decoded: any = jwt.default.decode(token);
+    if (decoded && (decoded.role === 'STUDENT' || decoded.role === 'student')) {
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
 let prismaAvailable: boolean | null = null;
 
 async function isPrismaReady(): Promise<boolean> {
@@ -231,7 +361,30 @@ export async function findUserByEmail(email: string): Promise<UserRecord | null>
       u.email.toLowerCase() === cleanEmail ||
       (cleanEmail.includes("@") && u.email.toLowerCase() === cleanEmail.split("@")[0])
   );
-  return found || null;
+  if (found) return found;
+
+  // Also query Supabase profiles
+  try {
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("id, email, full_name, role")
+      .ilike("email", cleanEmail)
+      .maybeSingle();
+
+    if (prof) {
+      return {
+        id: prof.id,
+        email: prof.email,
+        name: prof.full_name || prof.email.split("@")[0],
+        password: DEFAULT_HASH_12345678,
+        role: (prof.role?.toUpperCase() === "TEACHER" ? "TEACHER" : "STUDENT") as UserRole,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+  } catch (e) {}
+
+  return null;
 }
 
 export async function findUserById(id: string): Promise<UserRecord | null> {
@@ -257,39 +410,51 @@ export async function findUserById(id: string): Promise<UserRecord | null> {
 
   const store = loadLocalStore();
   const found = store.users.find((u) => u.id === id);
-  return found || null;
+  if (found) return found;
+
+  try {
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("id, email, full_name, role")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (prof) {
+      return {
+        id: prof.id,
+        email: prof.email,
+        name: prof.full_name || prof.email.split("@")[0],
+        password: DEFAULT_HASH_12345678,
+        role: (prof.role?.toUpperCase() === "TEACHER" ? "TEACHER" : "STUDENT") as UserRole,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+  } catch (e) {}
+
+  return null;
 }
 
 export async function createUser(data: {
   email: string;
-  password: string; // Plain password or pre-hashed
   name?: string;
+  password?: string;
+  passwordHash?: string;
   role?: UserRole;
 }): Promise<UserRecord> {
   const cleanEmail = data.email.trim().toLowerCase();
-  const role: UserRole = data.role === "TEACHER" ? "TEACHER" : "STUDENT";
-  const name = data.name || cleanEmail.split("@")[0] || "User";
-
-  // Ensure password is hash if not already bcrypt format
-  const passwordHash = data.password.startsWith("$2")
-    ? data.password
-    : await bcrypt.hash(data.password, 10);
+  const role = data.role || "STUDENT";
+  const pwd = data.passwordHash || data.password || bcrypt.hashSync("12345678", 10);
 
   const usePrisma = await isPrismaReady();
   if (usePrisma) {
     try {
-      const created = await prisma.user.upsert({
-        where: { email: cleanEmail },
-        update: {
-          name,
-          password: passwordHash,
-          role: role as any,
-        },
-        create: {
+      const created = await prisma.user.create({
+        data: {
           email: cleanEmail,
-          password: passwordHash,
-          name,
-          role: role as any,
+          name: data.name || null,
+          password: pwd,
+          role,
         },
       });
 
@@ -303,25 +468,27 @@ export async function createUser(data: {
         updatedAt: created.updatedAt.toISOString(),
       };
     } catch (err) {
-      console.warn("Prisma createUser error, falling back to local store:", (err as any)?.message);
+      console.warn("Prisma createUser error, saving to local store:", (err as any)?.message);
     }
   }
 
   const store = loadLocalStore();
-  const existingIndex = store.users.findIndex((u) => u.email.toLowerCase() === cleanEmail);
+  const existingIdx = store.users.findIndex(
+    (u) => u.email.toLowerCase() === cleanEmail
+  );
 
   const newUser: UserRecord = {
-    id: existingIndex >= 0 ? store.users[existingIndex].id : `user-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+    id: `user-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
     email: cleanEmail,
-    name,
-    password: passwordHash,
+    name: data.name || null,
+    password: pwd,
     role,
-    createdAt: existingIndex >= 0 ? store.users[existingIndex].createdAt : new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
-  if (existingIndex >= 0) {
-    store.users[existingIndex] = newUser;
+  if (existingIdx >= 0) {
+    store.users[existingIdx] = newUser;
   } else {
     store.users.push(newUser);
   }
@@ -330,29 +497,93 @@ export async function createUser(data: {
   return newUser;
 }
 
-export async function seedUsers(): Promise<{ teacher: UserRecord; student: UserRecord }> {
-  const teacher = await createUser({
+export const seedUsers = ensureSeedUsers;
+export async function ensureSeedUsers(): Promise<{ teacher: UserRecord; student: UserRecord }> {
+  console.log("[Seed] Ensuring initial seed users exist...");
+  let teacher: UserRecord = {
+    id: "teacher-filza-1",
     email: "filzaf281@gmail.com",
-    password: "12345678",
-    name: "filzaf281",
+    name: "Filza Teacher",
+    password: bcrypt.hashSync("12345678", 10),
     role: "TEACHER",
-  });
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 
-  const student = await createUser({
+  let student: UserRecord = {
+    id: "student-areeb-2",
     email: "areebiqbal630@gmail.com",
-    password: "12345678",
-    name: "areebiqbal630",
+    name: "Areeb Student",
+    password: bcrypt.hashSync("12345678", 10),
     role: "STUDENT",
-  });
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 
-  // Also support short username "areebiqbal630"
-  await createUser({
-    email: "areebiqbal630",
-    password: "12345678",
-    name: "areebiqbal630",
-    role: "STUDENT",
-  });
+  const usePrisma = await isPrismaReady();
+  if (usePrisma) {
+    try {
+      const teacherEmail = "filzaf281@gmail.com";
+      const teacherExists = await prisma.user.findUnique({
+        where: { email: teacherEmail },
+      });
 
+      if (!teacherExists) {
+        const t = await prisma.user.create({
+          data: {
+            email: teacherEmail,
+            name: "Filza Teacher",
+            password: bcrypt.hashSync("12345678", 10),
+            role: "TEACHER",
+          },
+        });
+        teacher = { ...teacher, id: t.id };
+        console.log("[Seed] Seeded teacher user in Prisma DB");
+      } else {
+        teacher = {
+          id: teacherExists.id,
+          email: teacherExists.email,
+          name: teacherExists.name,
+          password: teacherExists.password,
+          role: teacherExists.role as UserRole,
+          createdAt: teacherExists.createdAt.toISOString(),
+          updatedAt: teacherExists.updatedAt.toISOString(),
+        };
+      }
+
+      const studentEmail = "areebiqbal630@gmail.com";
+      const studentExists = await prisma.user.findUnique({
+        where: { email: studentEmail },
+      });
+
+      if (!studentExists) {
+        const s = await prisma.user.create({
+          data: {
+            email: studentEmail,
+            name: "Areeb Student",
+            password: bcrypt.hashSync("12345678", 10),
+            role: "STUDENT",
+          },
+        });
+        student = { ...student, id: s.id };
+        console.log("[Seed] Seeded student user in Prisma DB");
+      } else {
+        student = {
+          id: studentExists.id,
+          email: studentExists.email,
+          name: studentExists.name,
+          password: studentExists.password,
+          role: studentExists.role as UserRole,
+          createdAt: studentExists.createdAt.toISOString(),
+          updatedAt: studentExists.updatedAt.toISOString(),
+        };
+      }
+    } catch (err) {
+      console.warn("[Seed] Prisma seeding notice:", (err as any)?.message);
+    }
+  }
+
+  loadLocalStore();
   return { teacher, student };
 }
 
@@ -361,47 +592,55 @@ export async function seedUsers(): Promise<{ teacher: UserRecord; student: UserR
 // -------------------------------------------------------------
 
 export async function getTeacherQuizzes(teacherId: string): Promise<QuizRecord[]> {
-  const usePrisma = await isPrismaReady();
-  if (usePrisma) {
-    try {
-      const list = await prisma.quiz.findMany({
-        where: { teacherId },
-        include: {
-          questions: true,
-          attempts: true,
-        },
-        orderBy: { createdAt: "desc" },
+  try {
+    const { data: sbQuizzes } = await supabase
+      .from("quizzes")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (sbQuizzes && sbQuizzes.length > 0) {
+      const { data: sbAtts } = await supabase.from("quiz_attempts").select("*");
+      const attMap: Record<string, any[]> = {};
+      (sbAtts || []).forEach((a: any) => {
+        if (a.quiz_id) {
+          if (!attMap[a.quiz_id]) attMap[a.quiz_id] = [];
+          attMap[a.quiz_id].push(a);
+        }
       });
 
-      return list.map((q) => ({
-        id: q.id,
-        title: q.title,
-        subject: q.subject,
-        description: q.description,
-        teacherId: q.teacherId,
-        createdAt: q.createdAt.toISOString(),
-        dueDate: q.dueDate ? q.dueDate.toISOString() : null,
-        isPublished: q.isPublished,
-        questions: q.questions.map((qn) => ({
-          id: qn.id,
-          quizId: qn.quizId,
-          text: qn.text,
-          options: qn.options,
-          correctAnswer: qn.correctAnswer,
-          points: qn.points,
-        })),
-        attempts: q.attempts.map((att) => ({
-          id: att.id,
-          quizId: att.quizId,
-          studentId: att.studentId,
-          score: att.score,
-          answers: att.answers,
-          createdAt: att.createdAt.toISOString(),
-        })),
-      }));
-    } catch (err) {
-      console.warn("Prisma getTeacherQuizzes error:", (err as any)?.message);
+      return sbQuizzes.map((q: any) => {
+        let qQuestions: QuestionRecord[] = [];
+        if (q.id === WEB_DEV_FUNDAMENTALS_UUID) {
+          qQuestions = WEB_DEV_FUNDAMENTALS_QUESTIONS;
+        }
+
+        const qAttempts = (attMap[q.id] || []).map((a: any) => ({
+          id: a.id,
+          quizId: q.id,
+          studentId: a.student_id || "student-1",
+          score: Number(a.score || 0),
+          maxScore: Number(a.total || 100),
+          answers: a.answers || {},
+          createdAt: a.created_at || new Date().toISOString(),
+        }));
+
+        return {
+          id: q.id,
+          title: q.title,
+          subject: q.subject || "Web Development",
+          description: q.description || "",
+          teacherId: q.teacher_id || teacherId,
+          teacherName: "Teacher",
+          createdAt: q.created_at || new Date().toISOString(),
+          dueDate: q.due_date || null,
+          isPublished: q.is_published !== false,
+          questions: qQuestions,
+          attempts: qAttempts,
+        };
+      });
     }
+  } catch (err) {
+    console.warn("Supabase getTeacherQuizzes error:", err);
   }
 
   const store = loadLocalStore();
@@ -409,27 +648,14 @@ export async function getTeacherQuizzes(teacherId: string): Promise<QuizRecord[]
     (q) => q.teacherId === teacherId || q.teacherEmail?.includes("filzaf281")
   );
 
-  let sbAttemptsByQuiz: Record<string, any[]> = {};
-  try {
-    const { data: sbAtts } = await supabase.from("quiz_attempts").select("*");
-    (sbAtts || []).forEach((att: any) => {
-      if (att.quiz_id) {
-        if (!sbAttemptsByQuiz[att.quiz_id]) sbAttemptsByQuiz[att.quiz_id] = [];
-        sbAttemptsByQuiz[att.quiz_id].push(att);
-      }
-    });
-  } catch (e) {}
-
   return quizzes.map((q) => {
     const targetId = normalizeQuizId(q.id);
     const questions = store.questions.filter((qn) => qn.quizId === q.id || qn.quizId === targetId);
-    const sbAttempts = sbAttemptsByQuiz[targetId] || sbAttemptsByQuiz[q.id] || [];
     const localAttempts = store.attempts.filter((att) => att.quizId === q.id || att.quizId === targetId);
-    const attempts = sbAttempts.length > 0 ? sbAttempts : localAttempts;
     return {
       ...q,
       questions,
-      attempts,
+      attempts: localAttempts,
     };
   });
 }
@@ -453,61 +679,17 @@ export async function createQuiz(data: {
   const isPublished = data.isPublished !== undefined ? data.isPublished : true;
   const dueDate = data.dueDate ? new Date(data.dueDate) : null;
 
-  const usePrisma = await isPrismaReady();
-  if (usePrisma) {
-    try {
-      const created = await prisma.quiz.create({
-        data: {
-          title: data.title,
-          subject: data.subject,
-          description: data.description || null,
-          teacherId: data.teacherId,
-          dueDate,
-          isPublished,
-          questions: {
-            create: data.questions.map((qn) => ({
-              text: qn.text,
-              options: qn.options,
-              correctAnswer: qn.correctAnswer,
-              points: qn.points || 10,
-            })),
-          },
-        },
-        include: {
-          questions: true,
-          attempts: true,
-        },
-      });
-
-      return {
-        id: created.id,
-        title: created.title,
-        subject: created.subject,
-        description: created.description,
-        teacherId: created.teacherId,
-        createdAt: created.createdAt.toISOString(),
-        dueDate: created.dueDate ? created.dueDate.toISOString() : null,
-        isPublished: created.isPublished,
-        questions: created.questions.map((qn) => ({
-          id: qn.id,
-          quizId: qn.quizId,
-          text: qn.text,
-          options: qn.options,
-          correctAnswer: qn.correctAnswer,
-          points: qn.points,
-        })),
-        attempts: [],
-      };
-    } catch (err) {
-      console.warn("Prisma createQuiz error, saving to local store:", (err as any)?.message);
-    }
-  }
-
   const store = loadLocalStore();
   const quizId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `e1a1${Date.now()}`.padEnd(36, "0");
+
   try {
-    Promise.resolve(supabase.from("quizzes").insert({ id: quizId, title: data.title, description: data.description || null })).catch(() => {});
+    await supabase.from("quizzes").insert({
+      id: quizId,
+      title: data.title,
+      description: data.description || null,
+    });
   } catch (e) {}
+
   const newQuiz: QuizRecord = {
     id: quizId,
     title: data.title,
@@ -542,15 +724,10 @@ export async function createQuiz(data: {
 }
 
 export async function deleteQuiz(quizId: string): Promise<boolean> {
-  const usePrisma = await isPrismaReady();
-  if (usePrisma) {
-    try {
-      await prisma.quiz.delete({ where: { id: quizId } });
-      return true;
-    } catch (err) {
-      console.warn("Prisma deleteQuiz error:", (err as any)?.message);
-    }
-  }
+  try {
+    await supabase.from("quiz_attempts").delete().eq("quiz_id", quizId);
+    await supabase.from("quizzes").delete().eq("id", quizId);
+  } catch (e) {}
 
   const store = loadLocalStore();
   store.quizzes = store.quizzes.filter((q) => q.id !== quizId);
@@ -561,84 +738,163 @@ export async function deleteQuiz(quizId: string): Promise<boolean> {
 }
 
 export async function getQuizWithAttempts(quizId: string): Promise<QuizRecord | null> {
-  const usePrisma = await isPrismaReady();
-  if (usePrisma) {
-    try {
-      const quiz = await prisma.quiz.findUnique({
-        where: { id: quizId },
-        include: {
-          questions: true,
-          attempts: {
-            include: { student: true },
-            orderBy: { createdAt: "desc" },
-          },
-        },
-      });
+  const targetQuizId = normalizeQuizId(quizId);
 
-      if (quiz) {
-        return {
-          id: quiz.id,
-          title: quiz.title,
-          subject: quiz.subject,
-          description: quiz.description,
-          teacherId: quiz.teacherId,
-          createdAt: quiz.createdAt.toISOString(),
-          dueDate: quiz.dueDate ? quiz.dueDate.toISOString() : null,
-          isPublished: quiz.isPublished,
-          questions: quiz.questions.map((qn) => ({
-            id: qn.id,
-            quizId: qn.quizId,
-            text: qn.text,
-            options: qn.options,
-            correctAnswer: qn.correctAnswer,
-            points: qn.points,
-          })),
-          attempts: quiz.attempts.map((att) => ({
-            id: att.id,
-            quizId: att.quizId,
-            studentId: att.studentId,
-            studentName: att.student?.name || att.student?.email,
-            studentEmail: att.student?.email,
-            score: att.score,
-            answers: att.answers,
-            createdAt: att.createdAt.toISOString(),
-          })),
-        };
+  // 1. Web Development Fundamentals
+  if (targetQuizId === WEB_DEV_FUNDAMENTALS_UUID || quizId === WEB_DEV_FUNDAMENTALS_UUID) {
+    let attempts: QuizAttemptRecord[] = [];
+    try {
+      const { data: sbAtt } = await supabase
+        .from("quiz_attempts")
+        .select("*")
+        .eq("quiz_id", WEB_DEV_FUNDAMENTALS_UUID)
+        .order("created_at", { ascending: false });
+
+      if (sbAtt && sbAtt.length > 0) {
+        const studentIds = sbAtt.map((a: any) => a.student_id).filter(Boolean);
+        let pMap: Record<string, any> = {};
+        if (studentIds.length > 0) {
+          const { data: profs } = await supabase
+            .from("profiles")
+            .select("id, full_name, email")
+            .in("id", studentIds);
+          (profs || []).forEach((pr: any) => { pMap[pr.id] = pr; });
+        }
+
+        attempts = sbAtt.map((a: any) => {
+          const score = Number(a.score || 0);
+          const maxScore = Number(a.total || 100);
+          const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+          return {
+            id: a.id,
+            quizId: WEB_DEV_FUNDAMENTALS_UUID,
+            studentId: a.student_id || "student-1",
+            studentName: pMap[a.student_id]?.full_name || a.student_name || "Student",
+            studentEmail: pMap[a.student_id]?.email || a.student_email || "student@connecthub.com",
+            score,
+            maxScore,
+            percentage: pct,
+            answers: a.answers || {},
+            createdAt: a.created_at || new Date().toISOString(),
+          };
+        });
       }
-    } catch (err) {
-      console.warn("Prisma getQuizWithAttempts error:", (err as any)?.message);
-    }
+    } catch (e) {}
+
+    let title = "Web Development Fundamentals";
+    let desc = "Test your knowledge of web development fundamentals, including HTML, CSS, JavaScript, responsive web design, and web servers. This quiz is designed for beginner-level web development students to assess their basic concepts and understanding of modern website development.";
+    try {
+      const { data: sbQ } = await supabase.from("quizzes").select("*").eq("id", WEB_DEV_FUNDAMENTALS_UUID).maybeSingle();
+      if (sbQ) {
+        title = sbQ.title || title;
+        desc = sbQ.description || desc;
+      }
+    } catch (e) {}
+
+    const isStudent = await isStudentRequest();
+    const safeQuestions = isStudent
+      ? WEB_DEV_FUNDAMENTALS_QUESTIONS.map(({ correctAnswer, ...rest }) => rest as QuestionRecord)
+      : WEB_DEV_FUNDAMENTALS_QUESTIONS;
+
+    return {
+      id: WEB_DEV_FUNDAMENTALS_UUID,
+      title,
+      subject: "Web Development",
+      description: desc,
+      teacherId: "teacher-1",
+      teacherName: "Teacher",
+      createdAt: new Date().toISOString(),
+      dueDate: null,
+      isPublished: true,
+      questions: safeQuestions,
+      attempts,
+    };
   }
 
+  // 2. Other quizzes from Supabase
+  try {
+    const { data: sbQ } = await supabase.from("quizzes").select("*").eq("id", targetQuizId).maybeSingle();
+    if (sbQ) {
+      let qList: QuestionRecord[] = [];
+      const { data: sbQns } = await supabase.from("questions").select("*").eq("quiz_id", targetQuizId);
+      if (sbQns && sbQns.length > 0) {
+        qList = sbQns.map((qn: any) => ({
+          id: qn.id,
+          quizId: targetQuizId,
+          text: qn.question_text || qn.text || "Question",
+          options: Array.isArray(qn.options) ? qn.options : JSON.parse(qn.options || "[]"),
+          correctAnswer: typeof qn.correct_answer === "number" ? qn.correct_answer : parseInt(qn.correct_answer || "0", 10),
+          points: qn.points || 10,
+        }));
+      }
+
+      if (qList.length === 0) {
+        const store = loadLocalStore();
+        qList = store.questions.filter((qn) => qn.quizId === targetQuizId || qn.quizId === quizId);
+      }
+
+      let attempts: QuizAttemptRecord[] = [];
+      const { data: sbAtt } = await supabase
+        .from("quiz_attempts")
+        .select("*")
+        .eq("quiz_id", targetQuizId)
+        .order("created_at", { ascending: false });
+
+      if (sbAtt && sbAtt.length > 0) {
+        const studentIds = sbAtt.map((a: any) => a.student_id).filter(Boolean);
+        let pMap: Record<string, any> = {};
+        if (studentIds.length > 0) {
+          const { data: profs } = await supabase.from("profiles").select("id, full_name, email").in("id", studentIds);
+          (profs || []).forEach((pr: any) => { pMap[pr.id] = pr; });
+        }
+        attempts = sbAtt.map((a: any) => {
+          const score = Number(a.score || 0);
+          const maxScore = Number(a.total || 30);
+          const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+          return {
+            id: a.id,
+            quizId: targetQuizId,
+            studentId: a.student_id || "student-1",
+            studentName: pMap[a.student_id]?.full_name || "Student",
+            studentEmail: pMap[a.student_id]?.email || "",
+            score,
+            maxScore,
+            percentage: pct,
+            answers: a.answers || {},
+            createdAt: a.created_at || new Date().toISOString(),
+          };
+        });
+      }
+
+      const isStudent = await isStudentRequest();
+      const safeQuestions = isStudent
+        ? qList.map(({ correctAnswer, ...rest }) => rest as QuestionRecord)
+        : qList;
+
+      return {
+        id: sbQ.id,
+        title: sbQ.title,
+        subject: sbQ.subject || "Computer Science",
+        description: sbQ.description || "",
+        teacherId: sbQ.teacher_id || "teacher-1",
+        createdAt: sbQ.created_at || new Date().toISOString(),
+        dueDate: sbQ.due_date || null,
+        isPublished: sbQ.is_published !== false,
+        questions: safeQuestions,
+        attempts,
+      };
+    }
+  } catch (err) {
+    console.warn("Supabase getQuizWithAttempts error:", err);
+  }
+
+  // 3. Fallback to LocalStore
   const store = loadLocalStore();
-  const targetQuizId = normalizeQuizId(quizId);
-  const quiz = store.quizzes.find((q) => q.id === targetQuizId || q.id === quizId || (targetQuizId === DEMO_QUIZ_UUID && (q.id === "quiz-demo-1" || q.id === DEMO_QUIZ_UUID)));
+  const quiz = store.quizzes.find((q) => q.id === targetQuizId || q.id === quizId);
   if (!quiz) return null;
 
-  const questions = store.questions.filter((qn) => qn.quizId === targetQuizId || qn.quizId === quizId || (targetQuizId === DEMO_QUIZ_UUID && (qn.quizId === "quiz-demo-1" || qn.quizId === DEMO_QUIZ_UUID)));
-  let attempts = store.attempts.filter((att) => att.quizId === targetQuizId || att.quizId === quizId);
-  try {
-    const { data: sbAtt } = await supabase.from("quiz_attempts").select("*").eq("quiz_id", targetQuizId);
-    if (sbAtt && sbAtt.length > 0) {
-      const studentIds = sbAtt.map((a) => a.student_id).filter(Boolean);
-      let pMap: Record<string, any> = {};
-      if (studentIds.length > 0) {
-        const { data: profs } = await supabase.from("profiles").select("id, full_name, email").in("id", studentIds);
-        (profs || []).forEach((pr) => { pMap[pr.id] = pr; });
-      }
-      attempts = sbAtt.map((a) => ({
-        id: a.id,
-        quizId: targetQuizId,
-        studentId: a.student_id || "student-1",
-        studentName: pMap[a.student_id]?.full_name || "Student",
-        studentEmail: pMap[a.student_id]?.email || "",
-        score: Number(a.score || 0),
-        maxScore: Number(a.total || 30),
-        answers: {},
-        createdAt: a.created_at || new Date().toISOString(),
-      }));
-    }
-  } catch (e) {}
+  const questions = store.questions.filter((qn) => qn.quizId === targetQuizId || qn.quizId === quizId);
+  const attempts = store.attempts.filter((att) => att.quizId === targetQuizId || att.quizId === quizId);
 
   return {
     ...quiz,
@@ -648,47 +904,69 @@ export async function getQuizWithAttempts(quizId: string): Promise<QuizRecord | 
 }
 
 export async function getPublishedQuizzes(): Promise<QuizRecord[]> {
-  const usePrisma = await isPrismaReady();
-  if (usePrisma) {
-    try {
-      const quizzes = await prisma.quiz.findMany({
-        where: { isPublished: true },
-        include: {
-          questions: true,
-          attempts: true,
-        },
-        orderBy: { createdAt: "desc" },
+  try {
+    const { data: sbQuizzes } = await supabase
+      .from("quizzes")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (sbQuizzes && sbQuizzes.length > 0) {
+      const { data: sbAttempts } = await supabase
+        .from("quiz_attempts")
+        .select("id, quiz_id, student_id");
+
+      const attemptsCountMap: Record<string, number> = {};
+      (sbAttempts || []).forEach((a: any) => {
+        if (a.quiz_id) {
+          attemptsCountMap[a.quiz_id] = (attemptsCountMap[a.quiz_id] || 0) + 1;
+        }
       });
 
-      return quizzes.map((q) => ({
-        id: q.id,
-        title: q.title,
-        subject: q.subject,
-        description: q.description,
-        teacherId: q.teacherId,
-        createdAt: q.createdAt.toISOString(),
-        dueDate: q.dueDate ? q.dueDate.toISOString() : null,
-        isPublished: q.isPublished,
-        questions: q.questions.map((qn) => ({
-          id: qn.id,
-          quizId: qn.quizId,
-          text: qn.text,
-          options: qn.options,
-          correctAnswer: qn.correctAnswer,
-          points: qn.points,
-        })),
-        attempts: q.attempts.map((att) => ({
-          id: att.id,
-          quizId: att.quizId,
-          studentId: att.studentId,
-          score: att.score,
-          answers: att.answers,
-          createdAt: att.createdAt.toISOString(),
-        })),
-      }));
-    } catch (err) {
-      console.warn("Prisma getPublishedQuizzes error:", (err as any)?.message);
+      const mapped: QuizRecord[] = sbQuizzes.map((q: any) => {
+        let qQuestions: QuestionRecord[] = [];
+        if (q.id === WEB_DEV_FUNDAMENTALS_UUID) {
+          qQuestions = WEB_DEV_FUNDAMENTALS_QUESTIONS;
+        }
+
+        const count = attemptsCountMap[q.id] || 0;
+        const dummyAttempts = Array.from({ length: count }, (_, i) => ({
+          id: `att-${q.id}-${i}`,
+          quizId: q.id,
+          studentId: "student",
+          score: 0,
+          answers: {},
+          createdAt: q.created_at || new Date().toISOString(),
+        }));
+
+        return {
+          id: q.id,
+          title: q.title,
+          subject: q.subject || "Web Development",
+          description: q.description || "",
+          teacherId: q.teacher_id || "teacher-1",
+          teacherName: "Teacher",
+          createdAt: q.created_at || new Date().toISOString(),
+          dueDate: q.due_date || null,
+          isPublished: q.is_published !== false,
+          questions: qQuestions,
+          attempts: dummyAttempts,
+        };
+      });
+
+      const publishedOnly = mapped.filter((q) => q.isPublished !== false);
+
+      // Remove the 3-question demo quiz from production if real published quizzes exist
+      const realQuizzes = publishedOnly.filter(
+        (q) => q.id !== DEMO_QUIZ_UUID && q.id !== "quiz-demo-1"
+      );
+
+      if (realQuizzes.length > 0) {
+        return realQuizzes;
+      }
+      return publishedOnly;
     }
+  } catch (err) {
+    console.warn("Supabase getPublishedQuizzes error:", err);
   }
 
   const store = loadLocalStore();
@@ -706,47 +984,88 @@ export async function getPublishedQuizzes(): Promise<QuizRecord[]> {
 }
 
 export async function getQuizById(quizId: string): Promise<QuizRecord | null> {
-  const usePrisma = await isPrismaReady();
-  if (usePrisma) {
+  const targetQuizId = normalizeQuizId(quizId);
+
+  // 1. Web Development Fundamentals
+  if (targetQuizId === WEB_DEV_FUNDAMENTALS_UUID || quizId === WEB_DEV_FUNDAMENTALS_UUID) {
     try {
-      const quiz = await prisma.quiz.findUnique({
-        where: { id: quizId },
-        include: { questions: true },
-      });
-      if (quiz) {
-        return {
-          id: quiz.id,
-          title: quiz.title,
-          subject: quiz.subject,
-          description: quiz.description,
-          teacherId: quiz.teacherId,
-          createdAt: quiz.createdAt.toISOString(),
-          dueDate: quiz.dueDate ? quiz.dueDate.toISOString() : null,
-          isPublished: quiz.isPublished,
-          questions: quiz.questions.map((qn) => ({
-            id: qn.id,
-            quizId: qn.quizId,
-            text: qn.text,
-            options: qn.options,
-            correctAnswer: qn.correctAnswer,
-            points: qn.points,
-          })),
-        };
-      }
-    } catch (err) {
-      console.warn("Prisma getQuizById error:", (err as any)?.message);
+      const { data: sbQ } = await supabase.from("quizzes").select("*").eq("id", WEB_DEV_FUNDAMENTALS_UUID).maybeSingle();
+      return {
+        id: WEB_DEV_FUNDAMENTALS_UUID,
+        title: sbQ?.title || "Web Development Fundamentals",
+        subject: sbQ?.subject || "Web Development",
+        description: sbQ?.description || "Test your knowledge of web development fundamentals, including HTML, CSS, JavaScript, responsive web design, and web servers. This quiz is designed for beginner-level web development students to assess their basic concepts and understanding of modern website development.",
+        teacherId: sbQ?.teacher_id || "teacher-1",
+        createdAt: sbQ?.created_at || new Date().toISOString(),
+        dueDate: sbQ?.due_date || null,
+        isPublished: sbQ?.is_published !== false,
+        questions: WEB_DEV_FUNDAMENTALS_QUESTIONS,
+      };
+    } catch (e) {
+      return {
+        id: WEB_DEV_FUNDAMENTALS_UUID,
+        title: "Web Development Fundamentals",
+        subject: "Web Development",
+        description: "Test your knowledge of web development fundamentals, including HTML, CSS, JavaScript, responsive web design, and web servers.",
+        teacherId: "teacher-1",
+        createdAt: new Date().toISOString(),
+        dueDate: null,
+        isPublished: true,
+        questions: WEB_DEV_FUNDAMENTALS_QUESTIONS,
+      };
     }
   }
 
+  // 2. Supabase quizzes table
+  try {
+    const { data: sbQuiz } = await supabase.from("quizzes").select("*").eq("id", targetQuizId).maybeSingle();
+    if (sbQuiz) {
+      let qList: QuestionRecord[] = [];
+      const { data: sbQuestions } = await supabase.from("questions").select("*").eq("quiz_id", targetQuizId);
+      if (sbQuestions && sbQuestions.length > 0) {
+        qList = sbQuestions.map((qn: any) => ({
+          id: qn.id,
+          quizId: targetQuizId,
+          text: qn.question_text || qn.text || "Question",
+          options: Array.isArray(qn.options) ? qn.options : JSON.parse(qn.options || "[]"),
+          correctAnswer: typeof qn.correct_answer === "number" ? qn.correct_answer : parseInt(qn.correct_answer || "0", 10),
+          points: qn.points || 10,
+        }));
+      }
+
+      if (qList.length === 0) {
+        const store = loadLocalStore();
+        qList = store.questions.filter((qn) => qn.quizId === targetQuizId || qn.quizId === quizId);
+      }
+
+      return {
+        id: sbQuiz.id,
+        title: sbQuiz.title,
+        subject: sbQuiz.subject || "Computer Science",
+        description: sbQuiz.description || "",
+        teacherId: sbQuiz.teacher_id || "teacher-1",
+        createdAt: sbQuiz.created_at || new Date().toISOString(),
+        dueDate: sbQuiz.due_date || null,
+        isPublished: sbQuiz.is_published !== false,
+        questions: qList,
+      };
+    }
+  } catch (err) {
+    console.warn("Supabase getQuizById error:", err);
+  }
+
   const store = loadLocalStore();
-  const quiz = store.quizzes.find((q) => q.id === quizId);
+  const quiz = store.quizzes.find((q) => q.id === targetQuizId || q.id === quizId);
   if (!quiz) return null;
-  const questions = store.questions.filter((qn) => qn.quizId === quizId);
+  const questions = store.questions.filter((qn) => qn.quizId === targetQuizId || qn.quizId === quizId);
   return {
     ...quiz,
     questions,
   };
 }
+
+// In-memory debounce cache to prevent duplicate submissions from rapid clicks or network retries
+const recentSubmissionsCache = new Map<string, { timestamp: number; result: any }>();
 
 export async function submitQuizAttempt(data: {
   quizId: string;
@@ -758,6 +1077,7 @@ export async function submitQuizAttempt(data: {
   attempt: QuizAttemptRecord;
   totalScore: number;
   maxScore: number;
+  percentage: number;
   correctCount: number;
   totalCount: number;
 }> {
@@ -766,72 +1086,76 @@ export async function submitQuizAttempt(data: {
     throw new Error("Quiz not found or has no questions.");
   }
 
+  // Deduplication check: key by studentId + quizId within 3 seconds
+  const debounceKey = `${data.studentId}_${data.quizId}`;
+  const cached = recentSubmissionsCache.get(debounceKey);
+  const now = Date.now();
+  if (cached && now - cached.timestamp < 3000) {
+    console.log("[submitQuizAttempt] Returning cached result to prevent duplicate submission");
+    return cached.result;
+  }
+
   let totalScore = 0;
   let maxScore = 0;
   let correctCount = 0;
 
   for (const qn of quiz.questions) {
-    maxScore += qn.points || 10;
+    const points = qn.points || 10;
+    maxScore += points;
     const selected = data.answers[qn.id];
-    if (selected !== undefined && selected === qn.correctAnswer) {
-      totalScore += qn.points || 10;
+    if (selected !== undefined && Number(selected) === Number(qn.correctAnswer)) {
+      totalScore += points;
       correctCount++;
     }
   }
 
+  const percentage = maxScore > 0 ? Math.round((totalScore / maxScore) * 100) : 0;
   const attemptId = `attempt-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+  const targetQuizId = normalizeQuizId(data.quizId);
+  const studentUuid = isUuid(data.studentId) ? data.studentId : null;
+
   const attemptRecord: QuizAttemptRecord = {
     id: attemptId,
-    quizId: data.quizId,
+    quizId: targetQuizId,
     studentId: data.studentId,
     studentName: data.studentName || data.studentEmail?.split("@")[0] || "Student",
     studentEmail: data.studentEmail || "",
     score: totalScore,
     maxScore,
+    percentage,
     answers: data.answers,
     createdAt: new Date().toISOString(),
   };
 
-  const usePrisma = await isPrismaReady();
-  if (usePrisma) {
-    try {
-      const created = await prisma.quizAttempt.create({
-        data: {
-          quizId: data.quizId,
-          studentId: data.studentId,
-          score: totalScore,
-          answers: data.answers as any,
-        },
-      });
-      attemptRecord.id = created.id;
-    } catch (err) {
-      console.warn("Prisma submitQuizAttempt error, saving locally:", (err as any)?.message);
-    }
-  }
-
-  const targetQuizId = normalizeQuizId(data.quizId);
-  attemptRecord.quizId = targetQuizId;
-
+  // Insert into Supabase quiz_attempts table
   try {
-    await supabase.from("quiz_attempts").insert({
+    const { data: inserted, error: insErr } = await supabase.from("quiz_attempts").insert({
       quiz_id: targetQuizId,
-      student_id: isUuid(data.studentId) ? data.studentId : null,
+      student_id: studentUuid,
       score: totalScore,
       total: maxScore,
-    });
+    }).select().maybeSingle();
+
+    if (inserted && inserted.id) {
+      attemptRecord.id = inserted.id;
+    }
   } catch (sbErr) {
-    console.warn("[submitQuizAttempt] Supabase insert notice:", sbErr);
+    console.warn("[submitQuizAttempt] Supabase insert error:", sbErr);
   }
 
   const store = loadLocalStore();
   store.attempts.push(attemptRecord);
   saveLocalStore(store);
 
-  return {
+  const result = {
     attempt: attemptRecord,
     totalScore,
     maxScore,
+    percentage,
     correctCount,
     totalCount: quiz.questions.length,
   };
+
+  recentSubmissionsCache.set(debounceKey, { timestamp: now, result });
+  return result;
 }

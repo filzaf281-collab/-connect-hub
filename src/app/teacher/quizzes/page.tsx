@@ -221,6 +221,7 @@ export default function TeacherQuizzesPage() {
             {filtered.map((quiz) => {
               const attemptCount = quiz.attempts?.length || 0;
               const questionCount = quiz.questions?.length || 0;
+              const uniqueStudentCount = new Set((quiz.attempts || []).map((a: any) => a.studentId || a.studentEmail || a.id)).size;
 
               return (
                 <div
@@ -254,7 +255,7 @@ export default function TeacherQuizzesPage() {
                         </span>
                         <span className="flex items-center gap-1.5">
                           <Users size={13} className="text-blue-500" />
-                          <span>{attemptCount} Attempts</span>
+                          <span>{attemptCount} Attempts ({uniqueStudentCount} Students)</span>
                         </span>
                       </div>
 

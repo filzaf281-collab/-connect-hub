@@ -607,11 +607,8 @@ export default function TeacherPage() {
               <span>View Submissions ({submissions.length})</span>
             </button>
 
-            <button
-              onClick={() => {
-                setActiveTab("students");
-                router.push("/teacher/students");
-              }}
+            <Link
+              href="/teacher/students"
               className={`cursor-pointer select-none px-4 py-2.5 rounded-xl font-medium text-xs md:text-sm border transition flex items-center gap-2 ${
                 activeTab === "students"
                   ? "bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400 font-semibold"
@@ -622,7 +619,7 @@ export default function TeacherPage() {
             >
               <Users size={16} />
               <span>Manage Students ({students.length})</span>
-            </button>
+            </Link>
           </div>
         </div>
 
@@ -667,11 +664,8 @@ export default function TeacherPage() {
           </div>
 
           <div
-            onClick={() => {
-              setActiveTab("students");
-              router.push("/teacher/students");
-            }}
-            className={`cursor-pointer select-none p-4 md:p-5 rounded-2xl border shadow-sm transition hover:scale-[1.01] ${
+            onClick={() => router.push('/teacher/students')}
+            className={`cursor-pointer hover:shadow-lg transition-all select-none p-4 md:p-5 rounded-2xl border shadow-sm ${
               activeTab === "students" ? "ring-2 ring-emerald-500/50" : ""
             } ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"}`}
           >

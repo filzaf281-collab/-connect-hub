@@ -48,8 +48,31 @@ export default function SignInPage() {
         return;
       }
 
-      // 2. Redirect strictly based on authenticated role
       const userRole = (apiData.user?.role || "").toUpperCase();
+
+      // Ensure profile row exists in Supabase profiles table without failing
+      try {
+        const { data: existingProf } = await supabase
+          .from("profiles")
+          .select("id, role")
+          .ilike("email", cleanEmail)
+          .maybeSingle();
+
+        if (!existingProf && apiData.user?.id) {
+          await supabase.from("profiles").upsert(
+            {
+              id: apiData.user.id,
+              email: cleanEmail,
+              full_name: apiData.user?.name || cleanEmail.split("@")[0],
+              role: userRole === "TEACHER" ? "teacher" : "student",
+            },
+            { onConflict: "id" }
+          );
+        }
+      } catch (profErr) {
+        console.warn("[SignIn] Non-blocking profile check:", profErr);
+      }
+
       console.log(`[SignIn] Logged in successfully: ${cleanEmail} (Role: ${userRole})`);
 
       if (userRole === "TEACHER") {

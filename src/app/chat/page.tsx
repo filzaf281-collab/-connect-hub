@@ -1299,8 +1299,33 @@ export default function ChatPage() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw Object.assign(new Error("unsupported"), { name: "NotSupportedError" });
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const rec = new MediaRecorder(stream);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 48000,
+          channelCount: 1,
+        },
+      });
+
+      const mimeType =
+        typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/mp4")
+          ? "audio/mp4"
+          : "";
+
+      const options: MediaRecorderOptions = {
+        audioBitsPerSecond: 128000,
+      };
+      if (mimeType) {
+        options.mimeType = mimeType;
+      }
+
+      const rec = new MediaRecorder(stream, options);
       const chunks: BlobPart[] = [];
       rec.ondataavailable = (ev) => {
         if (ev.data && ev.data.size > 0) chunks.push(ev.data);

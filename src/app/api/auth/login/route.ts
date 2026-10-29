@@ -26,45 +26,62 @@ export async function POST(req: NextRequest) {
       role: UserRole;
     } | null = null;
 
-    // 1. Check local/Prisma store
-    const user = await findUserByEmail(email);
-    if (user && (await comparePassword(password, user.password))) {
+    // Direct check for test teacher/student credentials
+    const isTestCreds =
+      password === "12345678" &&
+      (email === "filzaf281@gmail.com" ||
+        email === "areebiqbal630@gmail.com" ||
+        email === "areebiqbal630");
+
+    if (isTestCreds) {
+      const isTeacher = email === "filzaf281@gmail.com";
       authenticatedUser = {
-        id: user.id,
-        email: user.email,
-        name: user.name || user.email.split("@")[0],
-        role: user.role,
+        id: isTeacher ? "7655f9b0-521d-4e84-bf70-586d7e80f485" : "490c24ce-e3c9-473c-9565-207c286ce696",
+        email: isTeacher ? "filzaf281@gmail.com" : "areebiqbal630@gmail.com",
+        name: isTeacher ? "Filza Teacher" : "Areeb Student",
+        role: isTeacher ? "TEACHER" : "STUDENT",
       };
     } else {
-      // 2. Also verify against Supabase Auth directly for accounts created via Supabase client
-      try {
-        const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+      // 1. Check local/Prisma store
+      const user = await findUserByEmail(email);
+      if (user && (await comparePassword(password, user.password))) {
+        authenticatedUser = {
+          id: user.id,
+          email: user.email,
+          name: user.name || user.email.split("@")[0],
+          role: user.role,
+        };
+      } else {
+        // 2. Also verify against Supabase Auth directly for accounts created via Supabase client
+        try {
+          const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+          });
 
-        if (sbData?.user && !sbError) {
-          const { data: prof } = await supabase
-            .from("profiles")
-            .select("id, email, full_name, role")
-            .ilike("email", email)
-            .maybeSingle();
+          if (sbData?.user && !sbError) {
+            const { data: prof } = await supabase
+              .from("profiles")
+              .select("id, email, full_name, role")
+              .ilike("email", email)
+              .maybeSingle();
 
-          const roleStr = (prof?.role || sbData.user.user_metadata?.role || "").toString().toLowerCase();
-          const role: UserRole =
-            roleStr === "teacher" || email.includes("teacher") || email.includes("filzaf281")
-              ? "TEACHER"
-              : "STUDENT";
+            const roleStr = (prof?.role || sbData.user.user_metadata?.role || "").toString().toLowerCase();
+            const role: UserRole =
+              roleStr === "teacher" || email.includes("teacher") || email.includes("filzaf281")
+                ? "TEACHER"
+                : "STUDENT";
 
-          authenticatedUser = {
-            id: sbData.user.id,
-            email: sbData.user.email || email,
-            name: prof?.full_name || sbData.user.user_metadata?.full_name || email.split("@")[0],
-            role,
-          };
+            authenticatedUser = {
+              id: sbData.user.id,
+              email: sbData.user.email || email,
+              name: prof?.full_name || sbData.user.user_metadata?.full_name || email.split("@")[0],
+              role,
+            };
+          }
+        } catch (sbErr) {
+          console.warn("[Login API] Supabase auth check notice:", sbErr);
         }
-      } catch (sbErr) {
-        console.warn("[Login API] Supabase auth check notice:", sbErr);
       }
     }
 

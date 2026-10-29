@@ -173,7 +173,7 @@ export const WEB_DEV_FUNDAMENTALS_QUESTIONS: QuestionRecord[] = [
 const LOCAL_STORE_FILE = path.join(process.cwd(), ".db-store.json");
 
 // Default initial seed data with bcrypt-hashed passwords for '12345678'
-const DEFAULT_HASH_12345678 = "$2a$10$wT37tV.r3XJ8hR8M0qB6p.s5eXl4d5w0lBfRjL5mE8q7A8N.d2EWW";
+const DEFAULT_HASH_12345678 = "$2b$10$hnnh/Q.2di4dHIL5cZE16O41PYgMwFk0g6Lmba1gX52.J7OjpRpZK";
 
 function loadLocalStore(): LocalStore {
   try {

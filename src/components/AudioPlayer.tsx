@@ -51,7 +51,8 @@ export default function AudioPlayer({
         }
         const ch = audio.getChannelData(0);
         const step = Math.max(1, Math.floor(ch.length / BAR_COUNT));
-        const next: number[] = [];
+                const rawPeaks: number[] = [];
+        let maxPeak = 0.01;
         for (let i = 0; i < BAR_COUNT; i++) {
           let max = 0;
           const start = i * step;
@@ -59,8 +60,10 @@ export default function AudioPlayer({
             const v = Math.abs(ch[start + j] || 0);
             if (v > max) max = v;
           }
-          next.push(Math.max(0.12, Math.min(1, max * 1.6)));
+          rawPeaks.push(max);
+          if (max > maxPeak) maxPeak = max;
         }
+        const next = rawPeaks.map((p) => Math.max(0.15, Math.min(1, (p / maxPeak) * 0.88 + 0.12)));
         setPeaks(next);
         setDuration(audio.duration || 0);
         ctx.close();
@@ -111,7 +114,7 @@ export default function AudioPlayer({
         ref={audioRef}
         src={src}
         preload="metadata"
-        onPlay={() => setPlaying(true)}
+        onPlay={() => { if (audioRef.current) audioRef.current.volume = 1.0; setPlaying(true); }}
         onPause={() => setPlaying(false)}
         onEnded={() => {
           setPlaying(false);

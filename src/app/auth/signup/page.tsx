@@ -74,7 +74,6 @@ export default function SignupPage() {
               email: cleanEmail,
               full_name: fullName || cleanEmail.split("@")[0] || "User",
               role: role,
-              is_teacher: role === "teacher",
             },
             { onConflict: "id" }
           );

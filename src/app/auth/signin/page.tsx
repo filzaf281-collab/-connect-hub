@@ -75,13 +75,12 @@ export default function SignInPage() {
         try {
           const { data: prof } = await supabase
             .from("profiles")
-            .select("role, is_teacher")
+            .select("role")
             .ilike("email", cleanEmail)
             .maybeSingle();
 
           if (
             prof?.role?.toLowerCase() === "teacher" ||
-            prof?.is_teacher === true ||
             cleanEmail.includes("teacher") ||
             cleanEmail.includes("filzaf281")
           ) {

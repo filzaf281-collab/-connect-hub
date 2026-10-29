@@ -175,7 +175,7 @@ export default function TeacherPage() {
         if (!active) return;
 
         const role = (profileData?.role || sessionUser?.role || "").toString().toLowerCase();
-        const isTeacherFlag = profileData?.is_teacher === true;
+        const isTeacherFlag = (profileData?.role || "").toString().toLowerCase() === "teacher";
         const emailLower = (activeUser.email || "").toLowerCase();
 
         const isTeacher =

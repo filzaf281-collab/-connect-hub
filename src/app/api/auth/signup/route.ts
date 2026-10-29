@@ -58,7 +58,6 @@ export async function POST(req: NextRequest) {
         .from("profiles")
         .update({
           role: role === "TEACHER" ? "teacher" : "student",
-          is_teacher: role === "TEACHER",
         })
         .ilike("email", email);
     } catch (sbErr) {

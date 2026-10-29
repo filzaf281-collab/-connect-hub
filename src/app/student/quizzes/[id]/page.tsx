@@ -40,7 +40,7 @@ export default function AttemptQuizPage({
   const [result, setResult] = useState<any>(null);
 
   useEffect(() => {
-    fetch(`/api/teacher/quizzes/${quizId}`)
+    fetch(`/api/student/quizzes/${quizId}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.quiz) {

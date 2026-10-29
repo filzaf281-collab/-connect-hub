@@ -32,7 +32,7 @@ export async function POST(
         const { data: prof } = await supabase
           .from("profiles")
           .select("id, full_name")
-          .eq("email", email)
+          .ilike("email", email.trim().toLowerCase())
           .maybeSingle();
 
         if (prof?.id) {

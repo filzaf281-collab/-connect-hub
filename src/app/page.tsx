@@ -1,29 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { MessageCircle, Sun, Moon, ArrowRight } from "lucide-react";
 
 export default function HomePage() {
-  const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.user?.role === "TEACHER") {
-          router.replace("/teacher/dashboard");
-        } else if (data?.user?.role === "STUDENT") {
-          router.replace("/student/dashboard");
-        }
-      })
-      .catch(() => {});
-  }, [router]);
+  }, []);
 
   const toggleTheme = () => {
     setTheme(theme === "light" ? "dark" : "light");

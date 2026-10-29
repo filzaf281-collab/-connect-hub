@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "../../../lib/supabase";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageCircle, GraduationCap, User } from "lucide-react";
@@ -15,20 +15,6 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
-
-  // If already authenticated, redirect immediately
-  useEffect(() => {
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.user?.role === "TEACHER") {
-          router.replace("/teacher/dashboard");
-        } else if (data?.user?.role === "STUDENT") {
-          router.replace("/student/dashboard");
-        }
-      })
-      .catch(() => {});
-  }, [router]);
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,8 +68,8 @@ export default function SignupPage() {
         console.warn("[SignUp] Supabase background note:", sbErr?.message);
       }
 
-      if (!apiRes.ok && !apiData.success && apiRes.status !== 409) {
-        setError(apiData.error || "Failed to create account");
+      if (!apiRes.ok || !apiData.success) {
+        setError(apiData.error || "Failed to create account. Please try again.");
         setLoading(false);
         return;
       }

@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "../../../lib/supabase";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageCircle, Eye, EyeOff } from "lucide-react";
@@ -14,20 +14,6 @@ export default function SignInPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // If already authenticated, redirect to appropriate role dashboard
-  useEffect(() => {
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data?.user?.role === "TEACHER") {
-          router.replace("/teacher/dashboard");
-        } else if (data?.user?.role === "STUDENT") {
-          router.replace("/student/dashboard");
-        }
-      })
-      .catch(() => {});
-  }, [router]);
-
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (loading) return;
@@ -37,7 +23,7 @@ export default function SignInPage() {
     try {
       const cleanEmail = email.trim().toLowerCase();
 
-      // 1. Authenticate with NextAuth / backend DB API
+      // 1. Authenticate with backend API (checks local DB & Supabase Auth)
       const apiRes = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -46,58 +32,23 @@ export default function SignInPage() {
 
       const apiData = await apiRes.json();
 
-      // Also sign in to Supabase for realtime chat session
+      // Also ensure client-side Supabase session is established for Realtime Chat
       try {
         await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
       } catch (sbErr: any) {
-        console.warn("[SignIn] Supabase background sync note:", sbErr?.message);
+        console.warn("[SignIn] Client Supabase sync notice:", sbErr?.message);
       }
 
       if (!apiRes.ok || !apiData.success) {
-        // If API returned invalid credentials, also check Supabase auth
-        const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password,
-        });
-
-        if (sbError && !apiData.success) {
-          console.log("[SignIn] Invalid credentials:", apiData.error || sbError.message);
-          setError(apiData.error || "Invalid login credentials");
-          setLoading(false);
-          return;
-        }
-
-        // Supabase succeeded, determine actual role from database
-        let role = "STUDENT";
-        try {
-          const { data: prof } = await supabase
-            .from("profiles")
-            .select("role")
-            .ilike("email", cleanEmail)
-            .maybeSingle();
-
-          if (
-            prof?.role?.toLowerCase() === "teacher" ||
-            cleanEmail.includes("teacher") ||
-            cleanEmail.includes("filzaf281")
-          ) {
-            role = "TEACHER";
-          }
-        } catch (e) {}
-
-        if (role === "TEACHER") {
-          router.push("/teacher/dashboard");
-        } else {
-          router.push("/student/dashboard");
-        }
-        router.refresh();
+        setError(apiData.error || "Invalid login credentials");
+        setLoading(false);
         return;
       }
 
-      // API login succeeded! Check role
+      // 2. Redirect strictly based on authenticated role
       const userRole = (apiData.user?.role || "").toUpperCase();
       console.log(`[SignIn] Logged in successfully: ${cleanEmail} (Role: ${userRole})`);
 

@@ -1578,23 +1578,14 @@ export default function ChatPage() {
 
   const toggleTheme = () => setTheme(dark ? "light" : "dark");
 
-  const formatTime = (timestamp: string) => {
-    if (!timestamp) return "";
-    try {
-      return new Date(timestamp).toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-        timeZone: "Asia/Karachi",
-      });
-    } catch {
-      return new Date(timestamp).toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      });
-    }
-  };
+  function formatPKTime(isoString?: string) {
+    if (!isoString) return '';
+    const s = String(isoString);
+    const normalized = !s.endsWith('Z') && !/[+-]\d{2}/.test(s)
+      ? (s.includes('T') ? s + 'Z' : s.replace(' ', 'T') + 'Z')
+      : s;
+    return new Date(normalized).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
 
   const isOnline = (id: string) => onlineUsers.includes(id);
 
@@ -2320,7 +2311,7 @@ export default function ChatPage() {
                           className="flex items-center justify-end gap-1 text-[11px] mt-1 opacity-70"
                           style={{ color: isMine ? "#111B21" : undefined }}
                         >
-                          {formatTime(item.created_at)}
+                          {formatPKTime(item.created_at)}
                           {/* Ticks: single grey = sent, double grey = delivered, double BLUE = read */}
                           {tick === "sent" && <Check size={14} style={{ color: "#667781" }} />}
                           {tick === "delivered" && (

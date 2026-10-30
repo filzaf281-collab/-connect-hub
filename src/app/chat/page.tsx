@@ -1580,11 +1580,23 @@ export default function ChatPage() {
 
   function formatPKTime(isoString?: string) {
     if (!isoString) return '';
-    const s = String(isoString);
-    const normalized = !s.endsWith('Z') && !/[+-]\d{2}/.test(s)
-      ? (s.includes('T') ? s + 'Z' : s.replace(' ', 'T') + 'Z')
-      : s;
-    return new Date(normalized).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    const s = String(isoString).trim();
+    const hasTz = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i.test(s);
+    const normalized = hasTz ? s : (s.includes('T') ? s + 'Z' : s.replace(' ', 'T') + 'Z');
+    try {
+      return new Date(normalized).toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Karachi',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      return new Date(normalized).toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    }
   }
 
   const isOnline = (id: string) => onlineUsers.includes(id);

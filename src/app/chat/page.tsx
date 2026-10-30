@@ -130,7 +130,10 @@ const colSupported: Record<string, boolean> = {};
 let readReceiptsSupported = true;
 
 async function insertMessage(payload: Record<string, any>) {
-  const p: Record<string, any> = { ...payload };
+  const p: Record<string, any> = {
+    created_at: new Date().toISOString(),
+    ...payload,
+  };
   // Skip columns we already learned are missing (avoids a failing round-trip).
   for (const c of OPTIONAL_MSG_COLS) {
     if (colSupported[c] === false) delete p[c];
@@ -179,7 +182,10 @@ const OPTIONAL_GROUP_COLS = ["file_url", "file_type", "audio_url", "summary"];
 let groupColsSupported = true;
 
 async function insertGroupMessage(payload: Record<string, any>) {
-  const p: Record<string, any> = { ...payload };
+  const p: Record<string, any> = {
+    created_at: new Date().toISOString(),
+    ...payload,
+  };
   if (!groupColsSupported) for (const c of OPTIONAL_GROUP_COLS) delete p[c];
 
   for (let i = 0; i <= OPTIONAL_GROUP_COLS.length; i++) {
@@ -1572,8 +1578,23 @@ export default function ChatPage() {
 
   const toggleTheme = () => setTheme(dark ? "light" : "dark");
 
-  const formatTime = (dateStr: string) =>
-    new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const formatTime = (timestamp: string) => {
+    if (!timestamp) return "";
+    try {
+      return new Date(timestamp).toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Asia/Karachi",
+      });
+    } catch {
+      return new Date(timestamp).toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      });
+    }
+  };
 
   const isOnline = (id: string) => onlineUsers.includes(id);
 
@@ -1617,7 +1638,7 @@ export default function ChatPage() {
     : [];
   const groupMemberCount = groupMembers.length || selectedGroup?.member_count || 1;
 
-  const viewItems = selected
+  const viewItems = (selected
     ? messages.map((m) => {
         const kind = classifyMessage(m);
         return {
@@ -1650,7 +1671,8 @@ export default function ChatPage() {
             created_at: m.created_at,
           };
         })
-      : [];
+      : []
+  ).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 
   const callStatusText = rtc.call
     ? rtc.call.status === "active"

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import CreatePortfolioButton from './CreatePortfolioButton';
 
 export default function SkillEarningModal({ quizResult, skillName, score, onClose }: any) {
   // Calculate earning based on score
@@ -60,7 +61,18 @@ export default function SkillEarningModal({ quizResult, skillName, score, onClos
             </p>
           </div>
 
-          <div className="flex gap-2 mt-6">
+          {score >= 60 && (
+            <div className="mt-4">
+              <CreatePortfolioButton
+                score={score}
+                skillName={skillName}
+                studentName={quizResult?.studentName || "Student"}
+                userId={quizResult?.studentId}
+              />
+            </div>
+          )}
+
+          <div className="flex gap-2 mt-4">
             <button
               onClick={onClose}
               className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 rounded-lg font-medium transition"

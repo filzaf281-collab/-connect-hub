@@ -4,6 +4,7 @@ import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import SkillEarningModal from "@/components/SkillEarningModal";
+import CreatePortfolioButton from "@/components/CreatePortfolioButton";
 import { useTheme } from "next-themes";
 import {
   ArrowLeft,
@@ -244,6 +245,15 @@ export default function AttemptQuizPage({
             >
               💰 See My Earning Potential
             </button>
+
+            {score >= 60 && (
+              <CreatePortfolioButton
+                score={score}
+                skillName={quiz?.title || "Web Development"}
+                studentName={result?.studentName || "Student"}
+                userId={result?.studentId}
+              />
+            )}
 
             {/* Question Breakdown Review */}
             <div className="text-left space-y-3 pt-4 border-t border-black/10 dark:border-white/10">

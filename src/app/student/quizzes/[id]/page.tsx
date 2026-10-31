@@ -3,6 +3,7 @@
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import SkillEarningModal from "@/components/SkillEarningModal";
 import { useTheme } from "next-themes";
 import {
   ArrowLeft,
@@ -38,6 +39,7 @@ export default function AttemptQuizPage({
 
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [showEarning, setShowEarning] = useState(false);
 
   useEffect(() => {
     fetch(`/api/student/quizzes/${quizId}`)
@@ -54,6 +56,7 @@ export default function AttemptQuizPage({
   const questions = quiz?.questions || [];
   const currentQuestion = questions[currentQuestionIndex];
   const totalQuestions = questions.length;
+  const score = result ? Math.round((result.totalScore / (result.maxScore || 1)) * 100) : 0;
   const progressPercent =
     totalQuestions > 0 ? Math.round(((currentQuestionIndex + 1) / totalQuestions) * 100) : 0;
 
@@ -230,10 +233,17 @@ export default function AttemptQuizPage({
               <div>
                 <p className="text-[11px] opacity-60">Percentage</p>
                 <p className="text-xl md:text-2xl font-extrabold text-purple-500">
-                  {Math.round((result.totalScore / result.maxScore) * 100)}%
+                  {score}%
                 </p>
               </div>
             </div>
+
+            <button
+              onClick={() => setShowEarning(true)}
+              className="w-full max-w-md mx-auto bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3 rounded-xl font-bold shadow-md hover:opacity-95 transition"
+            >
+              💰 See My Earning Potential
+            </button>
 
             {/* Question Breakdown Review */}
             <div className="text-left space-y-3 pt-4 border-t border-black/10 dark:border-white/10">
@@ -409,6 +419,14 @@ export default function AttemptQuizPage({
           </div>
         )}
       </main>
+      {showEarning && (
+        <SkillEarningModal
+          quizResult={result}
+          skillName={quiz?.title || 'General'}
+          score={score}
+          onClose={() => setShowEarning(false)}
+        />
+      )}
     </div>
   );
 }

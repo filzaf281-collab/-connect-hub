@@ -104,7 +104,7 @@ export default function AdminResetPage() {
   };
 
   useEffect(() => {
-    if (currentUserEmail === "filzaf281@gmail.com") {
+    if (["filzaf281@gmail.com", "filzaiqbal255100@gmail.com"].includes(currentUserEmail || "")) {
       loadAccountsCount();
     }
   }, [currentUserEmail]);
@@ -138,7 +138,7 @@ export default function AdminResetPage() {
             if (docs && docs.length > 0) {
               for (const doc of docs) {
                 // Do NOT delete admin email doc if found
-                if (doc.email?.toLowerCase().trim() === "filzaf281@gmail.com") {
+                if (["filzaf281@gmail.com", "filzaiqbal255100@gmail.com"].includes(doc.email?.toLowerCase().trim() || "")) {
                   continue;
                 }
                 await supabase.from(col).delete().eq("id", doc.id);
@@ -193,7 +193,7 @@ export default function AdminResetPage() {
               if (snapshot && snapshot.docs) {
                 for (const doc of snapshot.docs) {
                   const data = doc.data();
-                  if (data?.email?.toLowerCase().trim() === "filzaf281@gmail.com") {
+                  if (["filzaf281@gmail.com", "filzaiqbal255100@gmail.com"].includes(data?.email?.toLowerCase().trim() || "")) {
                     continue;
                   }
                   await doc.ref.delete();
@@ -234,7 +234,10 @@ export default function AdminResetPage() {
   }
 
   // Access Denied if current user is not admin
-  if (currentUserEmail !== "filzaf281@gmail.com") {
+  const user = { email: currentUserEmail };
+  const ALLOWED_EMAILS = ["filzaf281@gmail.com", "filzaiqbal255100@gmail.com"];
+  const isAdmin = ALLOWED_EMAILS.includes(user?.email || "");
+  if (!isAdmin) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="max-w-md w-full text-center p-8 bg-white rounded-2xl shadow-lg border border-gray-100">

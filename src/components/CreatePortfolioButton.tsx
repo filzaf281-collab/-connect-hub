@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import GetRealClientButton from "@/components/client-simulator-button";
 import Link from "next/link";
 import {
   Sparkles,
@@ -315,6 +316,14 @@ export default function CreatePortfolioButton({
                 </div>
 
                 {/* Share Buttons */}
+                <div className="pt-1">
+                  <GetRealClientButton
+                    username={createdPortfolio.username}
+                    studentName={studentName}
+                    className="w-full"
+                  />
+                </div>
+
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <button
                     onClick={handleCopyLink}

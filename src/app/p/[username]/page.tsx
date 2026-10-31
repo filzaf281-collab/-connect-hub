@@ -18,6 +18,8 @@ import {
   Briefcase,
 } from "lucide-react";
 import { PortfolioRecord } from "@/lib/portfolio-db";
+import ClientProofBadge from "@/components/client-simulator-badge";
+import GetRealClientButton from "@/components/client-simulator-button";
 
 export default function PublicPortfolioPage({
   params,
@@ -209,6 +211,10 @@ export default function PublicPortfolioPage({
                   </a>
                 ) : null}
 
+                <GetRealClientButton
+                  username={portfolio.username}
+                  studentName={portfolio.fullName}
+                />
                 <button
                   onClick={handleCopyLink}
                   className="px-4 py-2.5 rounded-xl border border-gray-300 hover:bg-gray-50 text-gray-700 font-semibold text-sm transition flex items-center gap-1.5 cursor-pointer"
@@ -306,6 +312,9 @@ export default function PublicPortfolioPage({
                 ))}
               </div>
             </div>
+
+            {/* AI Client Simulator Proof Badge */}
+            <ClientProofBadge username={portfolio.username} />
           </div>
 
           {/* Right Column: Hire / Verification Summary */}

@@ -99,7 +99,7 @@ export default function PublicPortfolioPage({
           </p>
           <Link
             href="/"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#00A884] text-white text-sm font-semibold hover:bg-[#008F72] transition"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-[#00A884] text-white text-sm font-semibold hover:bg-[#008F72] transition"
           >
             <ArrowLeft size={16} />
             <span>Go to Connect Hub</span>
@@ -185,7 +185,7 @@ export default function PublicPortfolioPage({
                 )}
                 {portfolio.verified && (
                   <div
-                    className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-md"
+                    className="absolute bottom-1 right-1 sm:bottom-2 sm:right-2 w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-xl shadow-gray-200/50 dark:shadow-none hover:shadow-2xl transition-all duration-300"
                     title="Verified by Connect Hub"
                   >
                     <CheckCircle2 size={24} className="text-[#00A884] fill-emerald-100" />

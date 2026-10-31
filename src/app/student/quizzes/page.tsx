@@ -51,13 +51,13 @@ export default function StudentQuizzesPage() {
   return (
     <div
       className={`min-h-screen flex flex-col font-sans transition-colors ${
-        dark ? "bg-[#111B21] text-[#E9EDEF]" : "bg-[#F0F2F5] text-[#111B21]"
+        dark ? "bg-[#111B21] text-[#E9EDEF]" : "bg-[#F8FAFC] text-[#111B21]"
       }`}
     >
       {/* Top Navbar */}
       <header
         className={`h-16 px-4 md:px-8 border-b flex items-center justify-between sticky top-0 z-30 shadow-sm backdrop-blur-md ${
-          dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
+          dark ? "bg-[#111B21]/80 border-[#2A3942]" : "bg-white/80 border-gray-100"
         }`}
       >
         <div className="flex items-center gap-3">
@@ -90,7 +90,7 @@ export default function StudentQuizzesPage() {
         {/* Banner */}
         <div
           className={`p-6 md:p-8 rounded-2xl border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
-            dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
+            dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-gray-100"
           }`}
         >
           <div>
@@ -155,9 +155,7 @@ export default function StudentQuizzesPage() {
               return (
                 <div
                   key={quiz.id}
-                  className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-between transition hover:shadow-md ${
-                    dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
-                  }`}
+                  className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-between hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-gray-100"}`}
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-2.5">

@@ -148,7 +148,7 @@ function SimulatorContent() {
   return (
     <div className="min-h-screen bg-[#F0F2F5] text-gray-900 font-sans flex flex-col">
       {/* Header (WhatsApp Client Profile) */}
-      <header className="bg-[#075E54] text-white px-4 py-3 sticky top-0 z-30 shadow-md">
+      <header className="bg-[#075E54] text-white px-4 py-3 sticky top-0 z-30 shadow-lg">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <button

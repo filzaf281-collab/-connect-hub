@@ -483,13 +483,13 @@ export default function TeacherPage() {
   return (
     <div
       className={`min-h-screen flex flex-col font-sans transition-colors ${
-        dark ? "bg-[#111B21] text-[#E9EDEF]" : "bg-[#F0F2F5] text-[#111B21]"
+        dark ? "bg-[#111B21] text-[#E9EDEF]" : "bg-[#F8FAFC] text-[#111B21]"
       }`}
     >
       {/* Top Header styled with ConnectHub Web theme */}
       <header
         className={`h-16 px-4 md:px-8 border-b flex items-center justify-between sticky top-0 z-30 shadow-sm backdrop-blur-md ${
-          dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
+          dark ? "bg-[#111B21]/80 border-[#2A3942]" : "bg-white/80 border-gray-100"
         }`}
       >
         <div className="flex items-center gap-3 md:gap-4">
@@ -627,9 +627,7 @@ export default function TeacherPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5">
           <div
             onClick={() => setActiveTab("assignments")}
-            className={`p-4 md:p-5 rounded-2xl border shadow-sm cursor-pointer transition hover:scale-[1.01] ${
-              activeTab === "assignments" ? "ring-2 ring-emerald-500/50" : ""
-            } ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"}`}
+            className={`p-5 md:p-6 rounded-2xl border border-gray-100 dark:border-[#2A3942] shadow-sm hover:shadow-xl hover:-translate-y-1 cursor-pointer transition-all duration-300 ${activeTab === "assignments" ? "ring-2 ring-emerald-500/50" : ""} ${dark ? "bg-[#202C33]" : "bg-white"}`}
           >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider opacity-60">
@@ -645,9 +643,7 @@ export default function TeacherPage() {
 
           <div
             onClick={() => setActiveTab("submissions")}
-            className={`p-4 md:p-5 rounded-2xl border shadow-sm cursor-pointer transition hover:scale-[1.01] ${
-              activeTab === "submissions" ? "ring-2 ring-emerald-500/50" : ""
-            } ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"}`}
+            className={`p-5 md:p-6 rounded-2xl border border-gray-100 dark:border-[#2A3942] shadow-sm hover:shadow-xl hover:-translate-y-1 cursor-pointer transition-all duration-300 ${activeTab === "submissions" ? "ring-2 ring-emerald-500/50" : ""} ${dark ? "bg-[#202C33]" : "bg-white"}`}
           >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider opacity-60">
@@ -665,9 +661,7 @@ export default function TeacherPage() {
 
           <div
             onClick={() => router.push('/teacher/students')}
-            className={`cursor-pointer hover:shadow-lg transition-all select-none p-4 md:p-5 rounded-2xl border shadow-sm ${
-              activeTab === "students" ? "ring-2 ring-emerald-500/50" : ""
-            } ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"}`}
+            className={`cursor-pointer select-none p-5 md:p-6 rounded-2xl border border-gray-100 dark:border-[#2A3942] shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ${activeTab === "students" ? "ring-2 ring-emerald-500/50" : ""} ${dark ? "bg-[#202C33]" : "bg-white"}`}
           >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider opacity-60">

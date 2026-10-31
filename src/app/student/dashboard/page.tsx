@@ -67,13 +67,13 @@ export default function StudentDashboard() {
   return (
     <div
       className={`min-h-screen flex flex-col font-sans transition-colors ${
-        dark ? "bg-[#111B21] text-[#E9EDEF]" : "bg-[#F0F2F5] text-[#111B21]"
+        dark ? "bg-[#111B21] text-[#E9EDEF]" : "bg-[#F8FAFC] text-[#111B21]"
       }`}
     >
       {/* Top Navbar */}
       <header
         className={`h-16 px-4 md:px-8 border-b flex items-center justify-between sticky top-0 z-30 shadow-sm backdrop-blur-md ${
-          dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
+          dark ? "bg-[#111B21]/80 border-[#2A3942]" : "bg-white/80 border-gray-100"
         }`}
       >
         <div className="flex items-center gap-3">
@@ -146,7 +146,7 @@ export default function StudentDashboard() {
         {/* Banner with Greeting */}
         <div
           className={`p-6 md:p-8 rounded-2xl border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${
-            dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
+            dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-gray-100"
           }`}
         >
           <div>
@@ -161,7 +161,7 @@ export default function StudentDashboard() {
           <div className="flex flex-wrap items-center gap-2.5">
             <Link
               href="/student/quizzes"
-              className="px-4 py-2.5 rounded-xl font-semibold text-xs md:text-sm bg-gradient-to-r from-[#008069] to-[#00A884] text-white shadow-md hover:opacity-95 transition flex items-center gap-2"
+              className="px-5 py-2.5 rounded-xl font-bold text-xs md:text-sm bg-gradient-to-r from-[#008069] to-[#00A884] text-white shadow-md shadow-[#00A884]/20 hover:shadow-lg hover:shadow-[#00A884]/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
             >
               <Award size={16} />
               <span>Browse Quizzes</span>
@@ -184,9 +184,7 @@ export default function StudentDashboard() {
         {/* Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div
-            className={`p-5 rounded-2xl border shadow-sm ${
-              dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
-            }`}
+            className={`p-6 rounded-2xl border shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-gray-100"}`}
           >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider opacity-60">
@@ -201,9 +199,7 @@ export default function StudentDashboard() {
           </div>
 
           <div
-            className={`p-5 rounded-2xl border shadow-sm ${
-              dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
-            }`}
+            className={`p-6 rounded-2xl border shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-gray-100"}`}
           >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider opacity-60">
@@ -218,9 +214,7 @@ export default function StudentDashboard() {
           </div>
 
           <div
-            className={`p-5 rounded-2xl border shadow-sm ${
-              dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
-            }`}
+            className={`p-6 rounded-2xl border shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-gray-100"}`}
           >
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-semibold uppercase tracking-wider opacity-60">
@@ -277,9 +271,7 @@ export default function StudentDashboard() {
               {quizzes.map((quiz) => (
                 <div
                   key={quiz.id}
-                  className={`p-5 rounded-2xl border shadow-sm flex flex-col justify-between transition hover:shadow-md ${
-                    dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-[#E9EDEF]"
-                  }`}
+                  className={`p-6 rounded-2xl border shadow-sm flex flex-col justify-between hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ${dark ? "bg-[#202C33] border-[#2A3942]" : "bg-white border-gray-100"}`}
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-2">
@@ -308,7 +300,7 @@ export default function StudentDashboard() {
 
                   <Link
                     href={`/student/quizzes/${quiz.id}`}
-                    className="w-full py-2.5 rounded-xl text-center font-semibold text-xs bg-[#00A884] hover:bg-[#008F72] text-white shadow-sm transition active:scale-95 flex items-center justify-center gap-1.5"
+                    className="w-full py-3 rounded-xl text-center font-bold text-xs bg-[#00A884] hover:bg-[#008F72] text-white shadow-sm shadow-[#00A884]/20 hover:shadow-md hover:shadow-[#00A884]/30 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-1.5 mt-2"
                   >
                     <span>Attempt Quiz</span>
                     <ArrowRight size={14} />

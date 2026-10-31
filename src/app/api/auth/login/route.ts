@@ -105,6 +105,7 @@ export async function POST(req: NextRequest) {
     const response = NextResponse.json({
       success: true,
       message: "Signed in successfully",
+      token,
       user: {
         id: authenticatedUser.id,
         email: authenticatedUser.email,
@@ -117,7 +118,7 @@ export async function POST(req: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60,
+      maxAge: 30 * 24 * 60 * 60,
       path: "/",
     });
 

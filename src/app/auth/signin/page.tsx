@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "../../../lib/supabase";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageCircle, Eye, EyeOff } from "lucide-react";
@@ -13,6 +13,25 @@ export default function SignInPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Restore persistent session if login hasn't expired without showing login page
+  useEffect(() => {
+    try {
+      const storedUser = localStorage.getItem("user");
+      const expiry = localStorage.getItem("loginExpiry");
+      if (storedUser && expiry && Number(expiry) > Date.now()) {
+        const parsed = JSON.parse(storedUser);
+        const role = (parsed?.role || "").toUpperCase();
+        if (role === "TEACHER") {
+          router.replace("/teacher/dashboard");
+        } else {
+          router.replace("/student/dashboard");
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [router]);
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,6 +93,15 @@ export default function SignInPage() {
       }
 
       console.log(`[SignIn] Logged in successfully: ${cleanEmail} (Role: ${userRole})`);
+
+      // Persistent Login: Save to browser local persistence (30 days)
+      try {
+        localStorage.setItem("user", JSON.stringify(apiData.user));
+        if (apiData.token) localStorage.setItem("token", apiData.token);
+        localStorage.setItem("loginExpiry", String(Date.now() + 30 * 24 * 60 * 60 * 1000));
+      } catch (storageErr) {
+        console.warn("[SignIn] Persistence warning:", storageErr);
+      }
 
       if (userRole === "TEACHER") {
         router.push("/teacher/dashboard");

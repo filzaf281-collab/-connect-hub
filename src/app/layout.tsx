@@ -25,6 +25,23 @@ export default function RootLayout({
     }
   }, []);
 
+  // Persistent login: validate session expiry on load
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const storedUser = localStorage.getItem("user");
+        const expiry = localStorage.getItem("loginExpiry");
+        if (storedUser && expiry && Number(expiry) <= Date.now()) {
+          localStorage.removeItem("user");
+          localStorage.removeItem("token");
+          localStorage.removeItem("loginExpiry");
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>

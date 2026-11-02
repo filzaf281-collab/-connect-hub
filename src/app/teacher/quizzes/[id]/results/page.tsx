@@ -4,6 +4,7 @@ import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
+import ResultView from "@/components/quiz/ResultView";
 import {
   ArrowLeft,
   Users,
@@ -304,67 +305,12 @@ export default function QuizResultsPage({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto py-4 space-y-4">
-              {quiz?.questions?.map((q: any, idx: number) => {
-                const selectedOptIdx = selectedAttempt.answers?.[q.id];
-                const isCorrect = selectedOptIdx === q.correctAnswer;
-
-                return (
-                  <div
-                    key={q.id}
-                    className="p-4 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 space-y-2 text-xs"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="font-bold text-sm">
-                        Q{idx + 1}: {q.text}
-                      </p>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          isCorrect
-                            ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                            : "bg-red-500/20 text-red-600 dark:text-red-400"
-                        }`}
-                      >
-                        {isCorrect ? `+${q.points || 10} pts` : "0 pts"}
-                      </span>
-                    </div>
-
-                    <div className="space-y-1 pt-1">
-                      {q.options?.map((opt: string, optIdx: number) => {
-                        const isStudentPick = selectedOptIdx === optIdx;
-                        const isActuallyCorrect = q.correctAnswer === optIdx;
-
-                        return (
-                          <div
-                            key={optIdx}
-                            className={`p-2 rounded-lg flex items-center justify-between ${
-                              isActuallyCorrect
-                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-semibold"
-                                : isStudentPick
-                                ? "bg-red-500/15 text-red-600 dark:text-red-400"
-                                : "opacity-60"
-                            }`}
-                          >
-                            <span>
-                              {String.fromCharCode(65 + optIdx)}. {opt}
-                            </span>
-                            {isActuallyCorrect && (
-                              <span className="text-[10px] uppercase font-bold text-emerald-600">
-                                Correct Answer
-                              </span>
-                            )}
-                            {isStudentPick && !isActuallyCorrect && (
-                              <span className="text-[10px] uppercase font-bold text-red-600">
-                                Student Pick
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="flex-1 overflow-y-auto py-4">
+              <ResultView
+                questions={quiz?.questions}
+                studentAnswers={selectedAttempt?.answers || {}}
+                dark={dark}
+              />
             </div>
           </div>
         </div>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import SkillEarningModal from "@/components/SkillEarningModal";
 import CreatePortfolioButton from "@/components/CreatePortfolioButton";
+import ResultView from "@/components/quiz/ResultView";
 import { useTheme } from "next-themes";
 import {
   ArrowLeft,
@@ -41,6 +42,7 @@ export default function AttemptQuizPage({
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [showEarning, setShowEarning] = useState(false);
+  const [showResultDetails, setShowResultDetails] = useState(true);
 
   useEffect(() => {
     fetch(`/api/student/quizzes/${quizId}`)
@@ -255,50 +257,28 @@ export default function AttemptQuizPage({
               />
             )}
 
-            {/* Question Breakdown Review */}
-            <div className="text-left space-y-3 pt-4 border-t border-black/10 dark:border-white/10">
-              <p className="font-bold text-xs uppercase tracking-wider opacity-70">
-                Question Review:
-              </p>
-              <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
-                {questions.map((q: any, idx: number) => {
-                  const studentPick = answers[q.id];
-                  const isCorrect = studentPick === q.correctAnswer;
+            {/* View Result / Check Answers Action */}
+            <button
+              type="button"
+              id="view-result-btn"
+              onClick={() => setShowResultDetails((prev) => !prev)}
+              className="w-full max-w-md mx-auto py-3 px-5 rounded-xl font-bold text-xs md:text-sm bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+            >
+              <CheckCircle2 size={16} />
+              <span>{showResultDetails ? "Check Result (Hide Answers)" : "View Result - Check Answers"}</span>
+            </button>
 
-                  return (
-                    <div
-                      key={q.id}
-                      className="p-3 rounded-xl border border-black/10 dark:border-white/10 bg-black/5 dark:bg-white/5 text-xs flex items-start justify-between gap-3"
-                    >
-                      <div>
-                        <p className="font-bold">
-                          Q{idx + 1}: {q.text}
-                        </p>
-                        <p className="opacity-70 mt-0.5">
-                          Your Answer:{" "}
-                          <span className={isCorrect ? "text-emerald-500 font-semibold" : "text-red-500 font-semibold"}>
-                            {studentPick !== undefined ? q.options[studentPick] : "None"}
-                          </span>
-                        </p>
-                        {!isCorrect && (
-                          <p className="text-emerald-500 font-semibold mt-0.5">
-                            Correct: {q.options[q.correctAnswer]}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="shrink-0 mt-0.5">
-                        {isCorrect ? (
-                          <CheckCircle2 size={16} className="text-emerald-500" />
-                        ) : (
-                          <XCircle size={16} className="text-red-500" />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+            {/* Detailed Result View */}
+            {showResultDetails && (
+              <div className="pt-4 border-t border-black/10 dark:border-white/10">
+                <ResultView
+                  questions={result?.questions || questions}
+                  breakdown={result?.breakdown}
+                  studentAnswers={answers}
+                  dark={dark}
+                />
               </div>
-            </div>
+            )}
 
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center justify-center gap-3 pt-4">

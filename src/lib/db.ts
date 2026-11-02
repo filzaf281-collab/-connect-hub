@@ -1147,6 +1147,27 @@ export async function submitQuizAttempt(data: {
   store.attempts.push(attemptRecord);
   saveLocalStore(store);
 
+  const breakdown = quiz.questions.map((qn) => {
+    const selected = data.answers[qn.id];
+    const isAttempted = selected !== undefined && selected !== null && selected !== -1;
+    const correctOpt = typeof qn.correctAnswer === "number" ? qn.correctAnswer : parseInt(String(qn.correctAnswer || "0"), 10);
+    const selectedOpt = isAttempted ? Number(selected) : null;
+    const isCorrect = isAttempted && selectedOpt === correctOpt;
+    return {
+      id: qn.id,
+      text: qn.text,
+      options: qn.options,
+      correctAnswer: correctOpt,
+      correct_option: correctOpt,
+      studentAnswer: selectedOpt,
+      selectedOption: selectedOpt,
+      selected_option: selectedOpt,
+      isAttempted,
+      isCorrect,
+      points: qn.points || 10,
+    };
+  });
+
   const result = {
     attempt: attemptRecord,
     totalScore,
@@ -1154,6 +1175,8 @@ export async function submitQuizAttempt(data: {
     percentage,
     correctCount,
     totalCount: quiz.questions.length,
+    breakdown,
+    questions: quiz.questions,
   };
 
   recentSubmissionsCache.set(debounceKey, { timestamp: now, result });

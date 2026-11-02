@@ -42,47 +42,77 @@ export default function SignInPage() {
     try {
       const cleanEmail = email.trim().toLowerCase();
 
-      // 1. Authenticate with backend API (checks local DB & Supabase Auth)
-      const apiRes = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: cleanEmail, password }),
-      });
-
-      const apiData = await apiRes.json();
-
-      // Also ensure client-side Supabase session is established for Realtime Chat
+      // 1. Authenticate with Supabase Auth directly on client
+      let sbUser: any = null;
+      let sbErrorMsg = "";
       try {
-        await supabase.auth.signInWithPassword({
+        const { data: sbData, error: sbErr } = await supabase.auth.signInWithPassword({
           email: cleanEmail,
           password,
         });
-      } catch (sbErr: any) {
-        console.warn("[SignIn] Client Supabase sync notice:", sbErr?.message);
+        if (sbErr) {
+          sbErrorMsg = sbErr.message;
+        } else {
+          sbUser = sbData?.user;
+        }
+      } catch (sbEx: any) {
+        sbErrorMsg = sbEx?.message || "";
       }
 
-      if (!apiRes.ok || !apiData.success) {
-        setError(apiData.error || "Invalid login credentials");
+      // 2. Also authenticate with backend API to set HTTP-only cookie and JWT
+      let apiUser: any = null;
+      let apiToken: string = "";
+      let apiErrorMsg = "";
+      try {
+        const apiRes = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: cleanEmail, password }),
+        });
+        const apiData = await apiRes.json();
+        if (apiRes.ok && apiData.success) {
+          apiUser = apiData.user;
+          apiToken = apiData.token || "";
+        } else {
+          apiErrorMsg = apiData.error || "";
+        }
+      } catch (apiEx: any) {
+        apiErrorMsg = apiEx?.message || "";
+      }
+
+      // If both failed, display error
+      if (!sbUser && !apiUser) {
+        setError(sbErrorMsg || apiErrorMsg || "Invalid login credentials. Please check your email and password.");
         setLoading(false);
         return;
       }
 
-      const userRole = (apiData.user?.role || "").toUpperCase();
+      // Determine authenticated user and role
+      const effectiveUser = apiUser || {
+        id: sbUser?.id,
+        email: cleanEmail,
+        name: sbUser?.user_metadata?.full_name || cleanEmail.split("@")[0],
+        role: (sbUser?.user_metadata?.role || "student").toUpperCase(),
+      };
 
-      // Ensure profile row exists in Supabase profiles table without failing
+      // Query profiles table for accurate role
+      let userRole = (effectiveUser.role || "STUDENT").toUpperCase();
       try {
-        const { data: existingProf } = await supabase
+        const { data: prof } = await supabase
           .from("profiles")
-          .select("id, role")
+          .select("id, role, full_name")
           .ilike("email", cleanEmail)
           .maybeSingle();
 
-        if (!existingProf && apiData.user?.id) {
+        if (prof?.role) {
+          userRole = prof.role.toLowerCase() === "teacher" ? "TEACHER" : "STUDENT";
+          effectiveUser.role = userRole;
+        } else if (effectiveUser.id) {
           await supabase.from("profiles").upsert(
             {
-              id: apiData.user.id,
+              id: effectiveUser.id,
               email: cleanEmail,
-              full_name: apiData.user?.name || cleanEmail.split("@")[0],
+              full_name: effectiveUser.name || cleanEmail.split("@")[0],
               role: userRole === "TEACHER" ? "teacher" : "student",
             },
             { onConflict: "id" }
@@ -96,8 +126,8 @@ export default function SignInPage() {
 
       // Persistent Login: Save to browser local persistence (30 days)
       try {
-        localStorage.setItem("user", JSON.stringify(apiData.user));
-        if (apiData.token) localStorage.setItem("token", apiData.token);
+        localStorage.setItem("user", JSON.stringify(effectiveUser));
+        if (apiToken) localStorage.setItem("token", apiToken);
         localStorage.setItem("loginExpiry", String(Date.now() + 30 * 24 * 60 * 60 * 1000));
       } catch (storageErr) {
         console.warn("[SignIn] Persistence warning:", storageErr);

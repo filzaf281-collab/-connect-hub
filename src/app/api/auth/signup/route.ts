@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
       {
         success: true,
         message: "Account created successfully",
+        token,
         user: {
           id: user.id,
           email: user.email,
@@ -87,12 +88,12 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
 
-    // Set HTTP-only cookie
+    // Set HTTP-only cookie with 30-day persistent session
     response.cookies.set(AUTH_COOKIE_NAME, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60, // 7 days
+      maxAge: 30 * 24 * 60 * 60, // 30 days
       path: "/",
     });
 

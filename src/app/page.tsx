@@ -43,13 +43,13 @@ export default function HomePage() {
 
         <div className="flex items-center gap-3">
           <Link
-            href="/auth/signin"
+            href="/login"
             className="px-4 py-2 rounded-xl text-sm font-semibold text-[#111B21] dark:text-[#E9EDEF] hover:bg-gray-100 dark:hover:bg-white/10 transition-all hover:scale-105"
           >
             Login
           </Link>
           <Link
-            href="/auth/signup"
+            href="/signup"
             className="px-5 py-2.5 rounded-xl text-sm font-bold bg-[#00A884] hover:bg-[#008F72] text-white shadow-md shadow-[#00A884]/25 hover:shadow-lg hover:shadow-[#00A884]/35 hover:scale-105 active:scale-95 transition-all"
           >
             Sign Up Free
@@ -92,14 +92,14 @@ export default function HomePage() {
             {/* CTA Buttons */}
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto sm:max-w-none">
               <Link
-                href="/auth/signin"
+                href="/login"
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 rounded-xl bg-[#00A884] hover:bg-[#008F72] text-white font-bold text-base px-8 py-4 shadow-lg shadow-[#00A884]/30 hover:shadow-xl hover:shadow-[#00A884]/40 hover:scale-105 active:scale-95 transition-all duration-200"
               >
                 <span>Start Chatting - Login</span>
                 <ArrowRight size={18} />
               </Link>
               <Link
-                href="/auth/signup"
+                href="/signup"
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 rounded-xl bg-white dark:bg-[#202C33] border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-200 hover:border-[#00A884] hover:text-[#00A884] hover:scale-105 font-semibold text-base px-8 py-4 shadow-xs transition-all duration-200"
               >
                 <span>Create Free Account</span>

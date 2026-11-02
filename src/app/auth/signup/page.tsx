@@ -26,55 +26,110 @@ export default function SignupPage() {
     const upperRole = role.toUpperCase(); // 'TEACHER' or 'STUDENT'
 
     try {
-      // 1. Call backend NextAuth / Prisma DB signup API
-      const apiRes = await fetch("/api/auth/signup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: cleanEmail,
-          password,
-          name: fullName || cleanEmail.split("@")[0] || "User",
-          role: upperRole,
-        }),
+      // 1. Register with Supabase Auth as primary provider
+      const { data: sbData, error: sbError } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          data: {
+            full_name: fullName || cleanEmail.split("@")[0] || "User",
+            role: role,
+          },
+        },
       });
 
-      const apiData = await apiRes.json();
+      if (sbError) {
+        console.warn("[SignUp] Supabase signUp note:", sbError.message);
+        if (
+          sbError.message.toLowerCase().includes("already registered") ||
+          sbError.message.toLowerCase().includes("already exists")
+        ) {
+          setError("This email is already registered. Please sign in instead.");
+          setLoading(false);
+          return;
+        }
+      }
 
-      // 2. Also register in Supabase for realtime chat session
-      try {
-        const { data: sbData } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password,
-          options: {
-            data: {
-              full_name: fullName || cleanEmail.split("@")[0] || "User",
-              role: role,
-            },
-          },
-        });
+      const sbUser = sbData?.user;
 
-        if (sbData?.user) {
+      // 2. Upsert profile in Supabase profiles table
+      if (sbUser?.id) {
+        try {
           await supabase.from("profiles").upsert(
             {
-              id: sbData.user.id,
+              id: sbUser.id,
               email: cleanEmail,
               full_name: fullName || cleanEmail.split("@")[0] || "User",
               role: role,
             },
             { onConflict: "id" }
           );
+        } catch (profErr) {
+          console.warn("[SignUp] Profile upsert notice:", profErr);
         }
-      } catch (sbErr: any) {
-        console.warn("[SignUp] Supabase background note:", sbErr?.message);
       }
 
-      if (!apiRes.ok || !apiData.success) {
-        setError(apiData.error || "Failed to create account. Please try again.");
-        setLoading(false);
-        return;
+      // 3. Call backend NextAuth / Prisma DB signup API to establish session cookie
+      let apiToken = "";
+      let apiUser = null;
+      try {
+        const apiRes = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: sbUser?.id,
+            email: cleanEmail,
+            password,
+            name: fullName || cleanEmail.split("@")[0] || "User",
+            role: upperRole,
+          }),
+        });
+
+        const apiData = await apiRes.json();
+        if (apiRes.ok && apiData.success) {
+          apiUser = apiData.user;
+          apiToken = apiData.token || "";
+        } else if (!sbUser) {
+          setError(apiData.error || "Failed to create account. Please try again.");
+          setLoading(false);
+          return;
+        }
+      } catch (apiErr: any) {
+        console.warn("[SignUp] Backend API sync note:", apiErr?.message);
+        if (!sbUser) {
+          setError("Network error while creating account. Please try again.");
+          setLoading(false);
+          return;
+        }
       }
 
-      // 3. Redirect strictly based on Role:
+      // 4. Ensure client-side Supabase session is established for Realtime Chat
+      try {
+        await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
+      } catch (signInErr) {
+        console.warn("[SignUp] Auto signIn notice:", signInErr);
+      }
+
+      // 5. Save session in localStorage for persistent 30-day login
+      const effectiveUser = apiUser || {
+        id: sbUser?.id || "user-" + Date.now(),
+        email: cleanEmail,
+        name: fullName || cleanEmail.split("@")[0] || "User",
+        role: upperRole,
+      };
+
+      try {
+        localStorage.setItem("user", JSON.stringify(effectiveUser));
+        if (apiToken) localStorage.setItem("token", apiToken);
+        localStorage.setItem("loginExpiry", String(Date.now() + 30 * 24 * 60 * 60 * 1000));
+      } catch (storageErr) {
+        console.warn("[SignUp] Storage notice:", storageErr);
+      }
+
+      // 6. Redirect strictly based on Role:
       // TEACHER -> /teacher/dashboard
       // STUDENT -> /student/dashboard
       console.log(`[SignUp] Success for ${cleanEmail}! Redirecting based on role: ${upperRole}`);
@@ -210,7 +265,7 @@ export default function SignupPage() {
 
         <div className="mt-8 pt-6 border-t border-gray-100 dark:border-[#2A3942] text-center text-sm text-gray-500 dark:text-gray-400">
           Already have an account?{" "}
-          <Link href="/auth/signin" className="text-[#00A884] hover:underline font-bold">
+          <Link href="/login" className="text-[#00A884] hover:underline font-bold">
             Login
           </Link>
         </div>

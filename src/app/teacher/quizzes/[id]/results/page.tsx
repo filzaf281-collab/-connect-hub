@@ -4,7 +4,7 @@ import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import ResultView from "@/components/quiz/ResultView";
+import QuizResultDetail from "@/components/teacher/QuizResultDetail";
 import {
   ArrowLeft,
   Users,
@@ -278,42 +278,13 @@ export default function QuizResultsPage({
 
       {/* Answer Breakdown Modal */}
       {selectedAttempt && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in"
-          onClick={() => setSelectedAttempt(null)}
-        >
-          <div
-            className={`w-full max-w-xl rounded-2xl p-6 shadow-2xl border max-h-[85vh] flex flex-col ${
-              dark ? "bg-[#202C33] border-[#3B4A54]" : "bg-white border-[#E9EDEF]"
-            }`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-black/10 dark:border-white/10">
-              <div>
-                <h3 className="font-bold text-base">
-                  {selectedAttempt.studentName || "Student"}&apos;s Answers
-                </h3>
-                <p className="text-xs opacity-60">
-                  Score: {selectedAttempt.score} / {maxPoints}
-                </p>
-              </div>
-              <button
-                onClick={() => setSelectedAttempt(null)}
-                className="px-3 py-1 rounded-lg border text-xs font-medium hover:bg-black/5 dark:hover:bg-white/5"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto py-4">
-              <ResultView
-                questions={quiz?.questions}
-                studentAnswers={selectedAttempt?.answers || {}}
-                dark={dark}
-              />
-            </div>
-          </div>
-        </div>
+        <QuizResultDetail
+          attempt={selectedAttempt}
+          questions={quiz?.questions || []}
+          maxPoints={maxPoints}
+          dark={dark}
+          onClose={() => setSelectedAttempt(null)}
+        />
       )}
     </div>
   );

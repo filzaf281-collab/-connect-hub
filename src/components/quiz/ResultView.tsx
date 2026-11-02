@@ -198,7 +198,7 @@ export default function ResultView({
                     pillBadge = (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
                         <CheckCircle2 size={11} />
-                        Your Answer (Correct)
+                        Your Answer - Correct
                       </span>
                     );
                   } else if (isActuallyCorrect && !isCorrect) {
@@ -220,7 +220,7 @@ export default function ResultView({
                     pillBadge = (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/20 text-red-700 dark:text-red-300">
                         <XCircle size={11} />
-                        Your Answer (Wrong)
+                        Your Answer - Wrong
                       </span>
                     );
                   }

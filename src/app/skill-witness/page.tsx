@@ -26,11 +26,26 @@ export default function SkillWitnessListPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("ch_skill_certs") || "[]");
+      if (Array.isArray(stored) && stored.length > 0) {
+        setCertificates(stored);
+      }
+    } catch (e) {}
+
     fetch("/api/skill-witness")
       .then((res) => res.json())
       .then((data) => {
         if (Array.isArray(data.certificates)) {
-          setCertificates(data.certificates);
+          setCertificates((prev) => {
+            const combined = [...data.certificates];
+            prev.forEach((p) => {
+              if (!combined.some((c) => c.id === p.id)) {
+                combined.push(p);
+              }
+            });
+            return combined;
+          });
         }
       })
       .catch((err) => console.error("Error loading certificates:", err))

@@ -90,6 +90,13 @@ export default function GenerateCertificatePage() {
         throw new Error(data.error || "Failed to generate certificate.");
       }
 
+      // Cache locally for instant access across tabs
+      try {
+        const stored = JSON.parse(localStorage.getItem("ch_skill_certs") || "[]");
+        const updated = [data.certificate, ...stored.filter((c: any) => c.id !== data.certificate.id)];
+        localStorage.setItem("ch_skill_certs", JSON.stringify(updated));
+      } catch (e) {}
+
       router.push(`/skill-witness/${data.certificate.id}`);
     } catch (err: any) {
       console.error("Certificate generation error:", err);

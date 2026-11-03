@@ -68,7 +68,16 @@ export async function saveCertificate(data: {
   score: number;
   videoProofUrl?: string | null;
 }): Promise<SkillCertificateRecord> {
-  const id = `cert_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  // Generate valid UUID for compatibility with Supabase UUID columns
+  const uuid = [
+    Math.random().toString(16).substring(2, 10),
+    Math.random().toString(16).substring(2, 6),
+    "4" + Math.random().toString(16).substring(2, 5),
+    ((Math.random() * 4 | 8).toString(16)) + Math.random().toString(16).substring(2, 5),
+    Math.random().toString(16).substring(2, 14),
+  ].join("-");
+
+  const id = uuid;
   const certificateHash = generateCertificateHash(data.userId);
   const qrCodeData = generateQrCodeUrl(id, certificateHash);
   const now = new Date().toISOString();
@@ -92,9 +101,9 @@ export async function saveCertificate(data: {
   store[record.id] = record;
   saveLocalFileStore(store);
 
-  // 2. Persist to Supabase if table exists
+  // 2. Primary: Persist to Supabase "skill_certificates" table
   try {
-    const { data: inserted, error } = await supabase.from("skill_certificates").insert({
+    const { data: inserted, error: certErr } = await supabase.from("skill_certificates").insert({
       id: record.id,
       user_id: record.userId && record.userId.length === 36 ? record.userId : null,
       student_name: record.studentName,
@@ -108,13 +117,32 @@ export async function saveCertificate(data: {
       created_at: record.createdAt,
     }).select().maybeSingle();
 
-    if (!error && inserted) {
+    if (!certErr && inserted) {
       record.id = inserted.id;
       store[record.id] = record;
       saveLocalFileStore(store);
+      return record;
     }
   } catch (err) {
-    console.warn("[SkillWitnessDB] Supabase insert fallback to local store:", err);
+    console.warn("[SkillWitnessDB] skill_certificates table insert warning:", err);
+  }
+
+  // 3. Secondary: Global serverless persistence via submissions table
+  try {
+    await supabase.from("submissions").insert({
+      id: record.id,
+      student_id: record.userId && record.userId.length === 36 ? record.userId : null,
+      student_name: record.studentName,
+      student_email: record.userId || "",
+      file_url: record.qrCodeData,
+      file_type: "skill_certificate",
+      summary: record.certificateHash,
+      content: JSON.stringify(record),
+      submitted_at: record.createdAt,
+      status: "verified",
+    });
+  } catch (subErr) {
+    console.warn("[SkillWitnessDB] Global submissions sync notice:", subErr);
   }
 
   return record;
@@ -126,10 +154,10 @@ export async function saveCertificate(data: {
 export async function getCertificateByIdOrHash(idOrHash: string): Promise<SkillCertificateRecord | null> {
   const trimmed = (idOrHash || "").trim();
   if (!trimmed) return null;
+  const isHash = trimmed.startsWith("CH-");
 
-  // 1. Try Supabase
+  // 1. Try Supabase "skill_certificates" table
   try {
-    const isHash = trimmed.startsWith("CH-");
     const query = supabase.from("skill_certificates").select("*");
     const { data, error } = isHash
       ? await query.ilike("certificate_hash", trimmed).maybeSingle()
@@ -154,12 +182,27 @@ export async function getCertificateByIdOrHash(idOrHash: string): Promise<SkillC
     console.warn("[SkillWitnessDB] Supabase lookup error:", err);
   }
 
-  // 2. Fallback to local file store
+  // 2. Try global serverless "submissions" table
+  try {
+    const subQuery = supabase.from("submissions").select("*").eq("file_type", "skill_certificate");
+    const { data: subData } = isHash
+      ? await subQuery.eq("summary", trimmed).maybeSingle()
+      : await subQuery.eq("id", trimmed).maybeSingle();
+
+    if (subData?.content) {
+      try {
+        const parsed = JSON.parse(subData.content);
+        if (parsed?.certificateHash) return parsed;
+      } catch (e) {}
+    }
+  } catch (subErr) {
+    console.warn("[SkillWitnessDB] submissions lookup error:", subErr);
+  }
+
+  // 3. Fallback to local file store
   const store = loadLocalFileStore();
-  // By ID
   if (store[trimmed]) return store[trimmed];
 
-  // By Hash
   const found = Object.values(store).find(
     (c) => c.certificateHash.toUpperCase() === trimmed.toUpperCase()
   );
@@ -172,7 +215,7 @@ export async function getCertificateByIdOrHash(idOrHash: string): Promise<SkillC
 export async function getUserCertificates(userId?: string): Promise<SkillCertificateRecord[]> {
   const results: SkillCertificateRecord[] = [];
 
-  // 1. Try Supabase
+  // 1. Try Supabase "skill_certificates"
   if (userId) {
     try {
       const { data, error } = await supabase
@@ -203,7 +246,32 @@ export async function getUserCertificates(userId?: string): Promise<SkillCertifi
     }
   }
 
-  // 2. Merge local store
+  // 2. Query global "submissions"
+  try {
+    const query = supabase
+      .from("submissions")
+      .select("*")
+      .eq("file_type", "skill_certificate")
+      .order("submitted_at", { ascending: false })
+      .limit(30);
+
+    const { data: subRows } = userId && userId.length === 36
+      ? await query.eq("student_id", userId)
+      : await query;
+
+    if (Array.isArray(subRows)) {
+      subRows.forEach((row) => {
+        try {
+          const parsed = JSON.parse(row.content);
+          if (parsed?.id && !results.some((r) => r.id === parsed.id)) {
+            results.push(parsed);
+          }
+        } catch (e) {}
+      });
+    }
+  } catch (e) {}
+
+  // 3. Merge local store
   const store = loadLocalFileStore();
   Object.values(store).forEach((c) => {
     if (!results.some((r) => r.id === c.id || r.certificateHash === c.certificateHash)) {
@@ -222,7 +290,7 @@ export async function getUserCertificates(userId?: string): Promise<SkillCertifi
  * Fetch best quiz score for a student in Supabase/local store
  */
 export async function getBestScoreForStudent(userId?: string, skillName?: string): Promise<number> {
-  let best = 85; // baseline recommended score
+  let best = 85;
   if (!userId) return best;
 
   try {

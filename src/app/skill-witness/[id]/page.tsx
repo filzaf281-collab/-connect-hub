@@ -43,6 +43,19 @@ export default function CertificateViewPage({
   const certCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Check localStorage fallback first for instant zero-lag rendering
+    try {
+      const stored = JSON.parse(localStorage.getItem("ch_skill_certs") || "[]");
+      const localMatch = stored.find(
+        (c: any) =>
+          c.id === certificateId ||
+          c.certificateHash?.toUpperCase() === certificateId.toUpperCase()
+      );
+      if (localMatch) {
+        setCertificate(localMatch);
+      }
+    } catch (e) {}
+
     let url = `/api/skill-witness/${certificateId}`;
     if (verifyParam) {
       url += `?verify=${encodeURIComponent(verifyParam)}`;
@@ -53,13 +66,20 @@ export default function CertificateViewPage({
       .then((data) => {
         if (data.certificate) {
           setCertificate(data.certificate);
-        } else {
+          try {
+            const stored = JSON.parse(localStorage.getItem("ch_skill_certs") || "[]");
+            const updated = [data.certificate, ...stored.filter((c: any) => c.id !== data.certificate.id)];
+            localStorage.setItem("ch_skill_certs", JSON.stringify(updated));
+          } catch (e) {}
+        } else if (!certificate) {
           setError(data.error || "Certificate not found.");
         }
       })
       .catch((err) => {
         console.error("Error loading certificate:", err);
-        setError("Failed to load certificate record.");
+        if (!certificate) {
+          setError("Failed to load certificate record.");
+        }
       })
       .finally(() => setLoading(false));
   }, [certificateId, verifyParam]);

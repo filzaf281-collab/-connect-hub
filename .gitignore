@@ -45,3 +45,4 @@ next-env.d.ts
 .vercel
 
 .db-store.json
+.skill-certificates-store.json

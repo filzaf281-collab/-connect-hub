@@ -16,6 +16,7 @@ import {
   Moon,
   LogOut,
   Award,
+  ShieldCheck,
 } from "lucide-react";
 
 export default function StudentDashboard() {
@@ -118,6 +119,18 @@ export default function StudentDashboard() {
             <span>Chat</span>
           </Link>
 
+          <Link
+            href="/skill-witness"
+            className={`px-3 py-1.5 rounded-xl text-xs md:text-sm font-semibold border transition flex items-center gap-1.5 ${
+              dark
+                ? "border-[#3B4A54] hover:bg-white/5 text-[#E9EDEF]"
+                : "border-[#E9EDEF] hover:bg-black/5 text-[#111B21]"
+            }`}
+          >
+            <ShieldCheck size={15} className="text-emerald-500" />
+            <span>Skill Witness</span>
+          </Link>
+
           {/* Theme toggle */}
           <button
             onClick={() => setTheme(dark ? "light" : "dark")}
@@ -177,6 +190,14 @@ export default function StudentDashboard() {
             >
               <FileText size={16} />
               <span>Assignments</span>
+            </Link>
+
+            <Link
+              href="/skill-witness/generate"
+              className="px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-700 hover:to-teal-600 text-white shadow-md shadow-emerald-500/20 hover:shadow-lg hover:shadow-emerald-500/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 border border-emerald-400/30"
+            >
+              <ShieldCheck size={16} />
+              <span>Generate Skill Witness Certificate</span>
             </Link>
           </div>
         </div>

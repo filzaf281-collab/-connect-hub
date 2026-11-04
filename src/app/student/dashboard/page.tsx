@@ -131,6 +131,18 @@ export default function StudentDashboard() {
             <span>Skill Witness</span>
           </Link>
 
+          <Link
+            href="/ai-client-simulator"
+            className={`px-3 py-1.5 rounded-xl text-xs md:text-sm font-semibold border transition flex items-center gap-1.5 ${
+              dark
+                ? "border-[#3B4A54] hover:bg-white/5 text-[#E9EDEF]"
+                : "border-[#E9EDEF] hover:bg-black/5 text-[#111B21]"
+            }`}
+          >
+            <span>🤖</span>
+            <span>AI Client Simulator</span>
+          </Link>
+
           {/* Theme toggle */}
           <button
             onClick={() => setTheme(dark ? "light" : "dark")}
@@ -198,6 +210,14 @@ export default function StudentDashboard() {
             >
               <ShieldCheck size={16} />
               <span>Generate Skill Witness Certificate</span>
+            </Link>
+
+            <Link
+              href="/ai-client-simulator"
+              className="px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-blue-500/20 hover:shadow-lg hover:shadow-blue-500/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 border border-blue-400/30"
+            >
+              <span>🤖</span>
+              <span>AI Client Simulator</span>
             </Link>
           </div>
         </div>

@@ -1,0 +1,9 @@
+# ConnectHub Robots.txt
+# https://connect-hub-plum.vercel.app
+
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+
+Sitemap: https://connect-hub-plum.vercel.app/sitemap.xml

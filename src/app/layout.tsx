@@ -45,6 +45,20 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <title>ConnectHub - AI Real-Time Chat, Quizzes, Client Simulator & Blockchain Certificates</title>
+        <meta name="description" content="ConnectHub is the next-generation communication and learning platform featuring live chat, quizzes, AI client simulator, auto portfolios, and tamper-proof blockchain skill witness certificates." />
+        <meta name="keywords" content="ConnectHub, Connect Hub, AI Client Simulator, Quiz System, Blockchain Certificate, Skill Witness, Real-Time Chat, Student Portfolio" />
+        <meta name="author" content="ConnectHub" />
+        <meta name="robots" content="index, follow" />
+        <meta property="og:title" content="ConnectHub - Communication & AI Learning Platform" />
+        <meta property="og:description" content="ConnectHub: Real-time chat, interactive quizzes, AI client simulator, student portfolios, and blockchain-verified certificates." />
+        <meta property="og:url" content="https://connect-hub-plum.vercel.app" />
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="ConnectHub" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="ConnectHub - Communication & AI Learning Platform" />
+        <meta name="twitter:description" content="ConnectHub: Real-time chat, interactive quizzes, AI client simulator, student portfolios, and blockchain-verified certificates." />
+        <link rel="canonical" href="https://connect-hub-plum.vercel.app" />
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#000000" />
         <meta name="background-color" content="#ffffff" />
